@@ -40,16 +40,16 @@ dev-all: ## Run both frontend and backend concurrently
 	@echo "$(YELLOW)Frontend: http://localhost:3000$(NC)"
 	@echo "$(YELLOW)API Docs: http://localhost:8000/docs$(NC)"
 	@echo "$(YELLOW)Press Ctrl+C to stop all servers$(NC)"
-	@trap 'kill 0' EXIT; \
-	cd $(BACKEND_DIR) && uvicorn app.main:app --reload --port 8000 & \
+	@bash -c "trap 'kill 0' EXIT INT TERM; \
+	cd $(BACKEND_DIR) && python3 -m uvicorn app.main:app --reload --port 8000 & \
 	cd $(FRONTEND_DIR) && npm run dev & \
-	wait
+	wait"
 
 dev-backend: ## Run backend only
 	@echo "$(BLUE)Starting backend server...$(NC)"
 	@echo "$(YELLOW)Backend: http://localhost:8000$(NC)"
 	@echo "$(YELLOW)API Docs: http://localhost:8000/docs$(NC)"
-	@cd $(BACKEND_DIR) && uvicorn app.main:app --reload --port 8000
+	@cd $(BACKEND_DIR) && python3 -m uvicorn app.main:app --reload --port 8000
 
 dev-frontend: ## Run frontend only
 	@echo "$(BLUE)Starting frontend server...$(NC)"
