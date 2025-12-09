@@ -58,7 +58,7 @@ async def startup_event():
     training_status = SVMService.get_training_status()
     if training_status == "not_started":
         # Start background training
-        logger.info("Starting background training of SVM model...")
+        logger.info("Starting background training of SVM model (model not found on disk)...")
         SVMService.start_background_training()
     elif training_status == "completed":
         logger.info("SVM model is ready")

@@ -68,6 +68,7 @@ class SVMService:
         """
         global _training_status
         with _training_status_lock:
+            logger.debug(f"Training status requested: {_training_status}")
             return _training_status
     
     @staticmethod
@@ -80,33 +81,36 @@ class SVMService:
         
         with _training_status_lock:
             if _training_status == "in_progress":
-                logger.info("Training already in progress, skipping")
+                logger.info("Background training already in progress, skipping new request")
                 return
             if _training_status == "completed":
-                logger.info("Model already trained, skipping")
+                logger.info("Model already trained, skipping background training")
                 return
             _training_status = "in_progress"
+            logger.info("Training status set to in_progress")
         
         def train_in_background():
             """Background training function"""
             global _model, _scaler, _training_status
             
             try:
-                logger.info("Starting background training of SVM model...")
+                logger.info("Background training thread started")
                 SVMService._train_model()
                 SVMService._save_model()
                 
                 with _training_status_lock:
                     _training_status = "completed"
-                logger.info("Background training completed successfully")
+                logger.info("Background training completed successfully, status set to completed")
             except Exception as e:
                 logger.error(f"Background training failed: {str(e)}")
                 with _training_status_lock:
                     _training_status = "failed"
+                    logger.info("Training status set to failed due to error")
                 # Reset model on failure
                 with _model_lock:
                     _model = None
                     _scaler = None
+                    logger.debug("Model and scaler reset after training failure")
         
         # Start training in background thread
         training_thread = threading.Thread(target=train_in_background, daemon=True)
@@ -213,10 +217,11 @@ class SVMService:
                 )
                 X_train = X_subset
                 y_train = y_subset
-                logger.info(f"Using subset of {sample_size} samples for training")
+                logger.info(f"Using subset of {sample_size} samples for training (stratified)")
             else:
                 X_train = X_full
                 y_train = y_full
+                logger.info("Dataset smaller than sample_size; using full dataset")
             
             # Normalize pixel values to [0, 1] (MNIST is already 0-255)
             X_train = X_train / 255.0
@@ -277,14 +282,18 @@ class SVMService:
             status = _training_status
         
         if status == "in_progress":
+            logger.info("Prediction requested while training is in progress")
             raise ValueError("Model is currently training. Please wait for training to complete.")
         
         if status == "failed":
+            logger.error("Prediction requested but training previously failed")
             raise ValueError("Model training failed. Please retry or check logs.")
         
         if _model is None or _scaler is None:
             if status == "not_started":
+                logger.warning("Prediction requested before training started")
                 raise ValueError("Model training has not started. Please wait.")
+            logger.error("Prediction requested but model or scaler not initialized")
             raise ValueError("SVM model or scaler not initialized.")
         
         try:

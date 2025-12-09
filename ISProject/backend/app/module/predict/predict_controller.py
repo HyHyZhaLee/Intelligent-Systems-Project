@@ -67,21 +67,21 @@ async def predict_digit(
     training_status = SVMService.get_training_status()
     
     if training_status == "in_progress":
-        logger.info("Prediction request received but model is still training")
+        logger.info("Prediction request received but model is still training (503)")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model is currently training. Please wait for training to complete and try again."
         )
     
     if training_status == "failed":
-        logger.warning("Prediction request received but model training failed")
+        logger.warning("Prediction request received but model training failed (503)")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model training failed. Please check server logs or contact administrator."
         )
     
     if training_status == "not_started":
-        logger.warning("Prediction request received but model training has not started")
+        logger.warning("Prediction request received but model training has not started (503)")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model training has not started. Please wait for training to begin."

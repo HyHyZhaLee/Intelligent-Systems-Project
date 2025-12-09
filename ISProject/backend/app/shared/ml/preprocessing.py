@@ -72,10 +72,41 @@ def preprocess_image(image_file: Union[bytes, io.BytesIO, Image.Image]) -> np.nd
             img_array = np.clip((img_array - p2) / (p98 - p2) * 255.0, 0, 255)
             logger.debug(f"Contrast enhanced - percentiles: p2={p2:.1f}, p98={p98:.1f}")
         
-        # Step 3: Determine if we need to invert (MNIST expects dark on light)
+        # Step 3: Determine if we need to invert (MNIST expects dark digits on light background)
+        # Handle both cases:
+        # - Black digit on white background (no inversion needed)
+        # - White digit on black background (needs inversion)
         mean_before_invert = img_array.mean()
-        if mean_before_invert > 127.5:  # More than half of 255
-            logger.info(f"Image mean ({mean_before_invert:.1f}) > 127.5, inverting (MNIST expects dark on light)")
+        median_value = np.median(img_array)
+        dark_pixels = np.sum(img_array < 128)
+        light_pixels = np.sum(img_array >= 128)
+        dark_ratio = 0.0
+        light_ratio = 0.0
+        total_pixels = dark_pixels + light_pixels
+        if total_pixels > 0:
+            dark_ratio = dark_pixels / total_pixels
+            light_ratio = light_pixels / total_pixels
+        
+        # Heuristic:
+        # - If image is overall bright but has enough dark pixels, keep as-is
+        # - If image is overall dark (more dark than light) OR median is low, invert
+        should_invert = False
+        if light_pixels == 0 or dark_pixels == 0:
+            # Degenerate case, rely on mean
+            should_invert = mean_before_invert > 127.5
+        else:
+            # If dark dominates heavily, invert to make background light
+            if dark_ratio > 0.6:
+                should_invert = True
+            # If image is bright overall but median is high (white digit on black), invert
+            elif mean_before_invert > 150 and median_value > 140:
+                should_invert = True
+        
+        if should_invert:
+            logger.info(
+                f"Inverting image (mean={mean_before_invert:.1f}, dark_ratio={dark_ratio:.2f}) "
+                f"to match MNIST dark-on-light format"
+            )
             img_array = 255.0 - img_array
         
         # Step 4: Center the digit in the image
