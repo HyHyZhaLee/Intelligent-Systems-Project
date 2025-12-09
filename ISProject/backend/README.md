@@ -37,7 +37,7 @@ backend/
 │   │   │   └── services/
 │   │   │       └── models_service.py
 │   │   │
-│   │   └── admin/             # Enterprise admin module
+│   │   └── admin/             # Admin module
 │   │       ├── admin_controller.py
 │   │       ├── schemas.py
 │   │       └── services/
@@ -231,18 +231,28 @@ curl http://localhost:8000/health
    - `datascientist@example.com` / `password123`
    - `admin@example.com` / `password123`
 
-3. **Train model (optional, for testing):**
+3. **Add a new user (optional):**
+   ```bash
+   # Interactive mode (recommended)
+   python3 scripts/add_user.py
+   
+   # Command line mode
+   python3 scripts/add_user.py email@example.com password123 "Full Name" data-scientist
+   ```
+   Available roles: `guest`, `data-scientist`, `admin`, `ml-engineer`, `analyst`
+
+4. **Train model (optional, for testing):**
    ```bash
    python3 scripts/train_model.py
    ```
    This downloads MNIST dataset and trains an SVM model.
 
-4. **Start server:**
+5. **Start server:**
    ```bash
    python3 -m uvicorn app.main:app --reload
    ```
 
-5. **Test endpoints:**
+6. **Test endpoints:**
    - Health: http://localhost:8000/health
    - Docs: http://localhost:8000/docs
    - Login: `POST /api/auth/login` with sample user credentials

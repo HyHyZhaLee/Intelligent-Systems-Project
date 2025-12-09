@@ -7,19 +7,19 @@ YELLOW := \033[0;33m
 RED := \033[0;31m
 NC := \033[0m # No Color
 
-# Directories
-BACKEND_DIR := ISProject/backend
-FRONTEND_DIR := ISProject/frontend
+# Directories (use absolute paths to avoid cwd issues)
+BACKEND_DIR := $(abspath ISProject/backend)
+FRONTEND_DIR := $(abspath ISProject/frontend)
 
 help: ## Show this help message
 	@echo "$(BLUE)Available commands:$(NC)"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
 
-install: install-backend install-frontend ## Install all project dependencies
+install: install-backend install-frontend ## Install all project dependencies (includes database setup)
 
-install-backend: ## Install backend dependencies
-	@echo "$(BLUE)Installing backend dependencies...$(NC)"
-	@cd $(BACKEND_DIR) && \
+install-backend: ## Install backend dependencies and setup database
+	@echo "$(BLUE)Installing backend dependencies...$(NC)"; \
+	cd "$(BACKEND_DIR)" && \
 	if [ ! -f .env ]; then \
 		echo "$(YELLOW)Creating .env file from .env.example...$(NC)"; \
 		cp .env.example .env; \
@@ -27,7 +27,21 @@ install-backend: ## Install backend dependencies
 	fi && \
 	python3 -m pip install --upgrade pip && \
 	python3 -m pip install -r requirements.txt && \
-	echo "$(GREEN)✓ Backend dependencies installed$(NC)"
+	echo "$(GREEN)✓ Backend dependencies installed$(NC)"; \
+	echo ""; \
+	echo "$(BLUE)Setting up database...$(NC)"; \
+	cd "$(BACKEND_DIR)" && python3 scripts/setup_database.py; \
+	EXIT_CODE=$$?; \
+	if [ $$EXIT_CODE -eq 1 ]; then \
+		echo ""; \
+		echo "$(YELLOW)No users found. Creating your first admin user...$(NC)"; \
+		echo "$(YELLOW)This user will have full admin access to all features.$(NC)"; \
+		echo ""; \
+		cd "$(BACKEND_DIR)" && python3 scripts/add_user.py --first-user; \
+		echo "$(GREEN)✓ Database setup complete$(NC)"; \
+	else \
+		echo "$(GREEN)✓ Database setup complete$(NC)"; \
+	fi
 
 install-frontend: ## Install frontend dependencies
 	@echo "$(BLUE)Installing frontend dependencies...$(NC)"

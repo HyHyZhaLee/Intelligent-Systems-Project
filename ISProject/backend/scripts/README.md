@@ -16,7 +16,7 @@ python3 scripts/init_db.py
 - All database tables (users, audit_logs, batch_jobs, model_metadata)
 - Sample users:
   - `datascientist@example.com` / `password123` (data-scientist role)
-  - `admin@example.com` / `password123` (enterprise role)
+  - `admin@example.com` / `password123` (admin role)
 
 ### `train_model.py`
 Train and save a pre-trained SVM model using MNIST dataset.

@@ -9,7 +9,7 @@ from datetime import datetime
 class UserCreate(BaseModel):
     email: EmailStr
     name: str
-    role: str  # 'data-scientist', 'enterprise', 'ml-engineer', 'analyst'
+    role: str  # 'data-scientist', 'admin', 'ml-engineer', 'analyst'
 
 
 class UserUpdate(BaseModel):

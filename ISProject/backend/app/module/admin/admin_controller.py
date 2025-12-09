@@ -1,6 +1,6 @@
 """
 Admin Controller
-Handles all enterprise/admin endpoints
+Handles all admin endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
@@ -95,7 +95,7 @@ async def create_user(
     
     - **email**: User email address
     - **name**: User full name
-    - **role**: User role ('data-scientist', 'enterprise', 'ml-engineer', 'analyst')
+    - **role**: User role ('data-scientist', 'admin', 'ml-engineer', 'analyst')
     """
     # TODO: Implement user creation
     # user = await admin_service.create_user(user_data, db)

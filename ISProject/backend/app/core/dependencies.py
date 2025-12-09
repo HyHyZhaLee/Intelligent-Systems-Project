@@ -44,14 +44,14 @@ def get_current_user(
 
 def get_current_admin_user(current_user: dict = Depends(get_current_user)):
     """Dependency to ensure user is an admin"""
-    if current_user.get("role") != "enterprise":
+    if current_user.get("role") != "admin":
         raise AuthorizationError("Admin access required")
     return current_user
 
 
 def get_current_data_scientist(current_user: dict = Depends(get_current_user)):
     """Dependency to ensure user is a data scientist"""
-    if current_user.get("role") not in ["data-scientist", "enterprise"]:
+    if current_user.get("role") not in ["data-scientist", "admin"]:
         raise AuthorizationError("Data scientist access required")
     return current_user
 

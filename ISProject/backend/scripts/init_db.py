@@ -34,8 +34,8 @@ def create_sample_users():
             {
                 "email": "admin@example.com",
                 "password": "password123",
-                "name": "Enterprise Admin",
-                "role": "enterprise"
+                "name": "Admin User",
+                "role": "admin"
             }
         ]
         
