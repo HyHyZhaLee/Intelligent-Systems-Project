@@ -11,6 +11,7 @@ from app.core.exceptions import AuthenticationError, AuthorizationError
 from typing import Optional
 
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
@@ -66,7 +67,7 @@ def verify_api_key_header(api_key: Optional[str] = Header(None, alias="X-API-Key
 
 
 def get_optional_auth(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
     api_key: Optional[str] = Header(None, alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
