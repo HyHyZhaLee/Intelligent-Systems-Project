@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -10,7 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { LogOut, Download, Plus, Settings, Activity, Users, Key, FileText, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminApi } from '../services/api';
 import type { User } from '../App';
+import type { SystemStatsData, AdminUser, APIConfigData, AuditLog } from '../types/api';
 
 interface EnterprisePortalProps {
   user: User;
@@ -18,51 +20,135 @@ interface EnterprisePortalProps {
 }
 
 export default function EnterprisePortal({ user, onLogout }: EnterprisePortalProps) {
-  const [activeUsers] = useState(24);
-  const [processedToday] = useState(125678);
-  const [successRate] = useState(99.1);
-  const [errors] = useState(87);
+  const [stats, setStats] = useState<SystemStatsData | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [apiConfig, setApiConfig] = useState<APIConfigData | null>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
   const [addUserDialogOpen, setAddUserDialogOpen] = useState(false);
   const [editUserDialogOpen, setEditUserDialogOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<typeof mockUsers[0] | null>(null);
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiKeyCopied, setApiKeyCopied] = useState(false);
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState('data-scientist');
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserEmail, setEditUserEmail] = useState('');
+  const [editUserRole, setEditUserRole] = useState('data-scientist');
+  const [auditLogSearch, setAuditLogSearch] = useState('');
+  const [auditLogFilter, setAuditLogFilter] = useState('all');
 
-  const mockUsers = [
-    { id: 1, name: 'John Doe', email: 'john@company.com', role: 'Data Scientist', status: 'Active' },
-    { id: 2, name: 'Jane Smith', email: 'jane@company.com', role: 'ML Engineer', status: 'Active' },
-    { id: 3, name: 'Bob Wilson', email: 'bob@company.com', role: 'Analyst', status: 'Inactive' },
-    { id: 4, name: 'Alice Brown', email: 'alice@company.com', role: 'Data Scientist', status: 'Active' },
-  ];
+  // Fetch initial data
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const [statsRes, usersRes, configRes, logsRes] = await Promise.all([
+          adminApi.getSystemStats(),
+          adminApi.listUsers(),
+          adminApi.getAPIConfig(),
+          adminApi.getAuditLogs({ page: 1, page_size: 50 }),
+        ]);
 
-  const mockApiLogs = [
-    { timestamp: '2025-11-03 14:32:15', endpoint: '/predict', status: 200, responseTime: '45ms', images: 1 },
-    { timestamp: '2025-11-03 14:31:58', endpoint: '/batch', status: 200, responseTime: '2.3s', images: 50 },
-    { timestamp: '2025-11-03 14:30:42', endpoint: '/predict', status: 200, responseTime: '38ms', images: 1 },
-    { timestamp: '2025-11-03 14:28:19', endpoint: '/predict', status: 500, responseTime: '12ms', images: 1 },
-    { timestamp: '2025-11-03 14:25:33', endpoint: '/batch', status: 200, responseTime: '1.8s', images: 25 },
-  ];
+        if (statsRes.success) setStats(statsRes.data);
+        if (usersRes.success) setUsers(usersRes.data);
+        if (configRes.success) setApiConfig(configRes.data);
+        if (logsRes.success) setAuditLogs(logsRes.data.logs);
+      } catch (error: any) {
+        toast.error(`Failed to load data: ${error.message}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
 
-  const handleEditUser = (userData: typeof mockUsers[0]) => {
+  const handleEditUser = (userData: AdminUser) => {
     setSelectedUser(userData);
+    setEditUserName(userData.name);
+    setEditUserEmail(userData.email);
+    setEditUserRole(userData.role);
     setEditUserDialogOpen(true);
   };
 
-  const handleAddUser = () => {
-    setAddUserDialogOpen(false);
-    toast.success('User added successfully!');
+  const handleAddUser = async () => {
+    if (!newUserName || !newUserEmail) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+    try {
+      const response = await adminApi.createUser({
+        name: newUserName,
+        email: newUserEmail,
+        role: newUserRole,
+      });
+      if (response.success) {
+        toast.success('User added successfully!');
+        setAddUserDialogOpen(false);
+        setNewUserName('');
+        setNewUserEmail('');
+        setNewUserRole('data-scientist');
+        // Refresh users list
+        const usersRes = await adminApi.listUsers();
+        if (usersRes.success) setUsers(usersRes.data);
+      }
+    } catch (error: any) {
+      toast.error(`Failed to add user: ${error.message}`);
+    }
   };
 
-  const handleSaveChanges = () => {
-    setEditUserDialogOpen(false);
-    toast.success('User updated successfully!');
+  const handleSaveChanges = async () => {
+    if (!selectedUser) return;
+    try {
+      const response = await adminApi.updateUser(selectedUser.id, {
+        name: editUserName,
+        email: editUserEmail,
+        role: editUserRole,
+      });
+      if (response.success) {
+        toast.success('User updated successfully!');
+        setEditUserDialogOpen(false);
+        // Refresh users list
+        const usersRes = await adminApi.listUsers();
+        if (usersRes.success) setUsers(usersRes.data);
+      }
+    } catch (error: any) {
+      toast.error(`Failed to update user: ${error.message}`);
+    }
+  };
+
+  const handleDeleteUser = async (userId: number) => {
+    if (!confirm('Are you sure you want to deactivate this user?')) return;
+    try {
+      const response = await adminApi.deactivateUser(userId);
+      if (response.success) {
+        toast.success('User deactivated successfully');
+        // Refresh users list
+        const usersRes = await adminApi.listUsers();
+        if (usersRes.success) setUsers(usersRes.data);
+      }
+    } catch (error: any) {
+      toast.error(`Failed to deactivate user: ${error.message}`);
+    }
+  };
+
+  const handleExportAuditLogs = async () => {
+    try {
+      await adminApi.exportAuditLogs();
+      toast.success('Audit logs exported successfully');
+    } catch (error: any) {
+      toast.error(`Failed to export audit logs: ${error.message}`);
+    }
   };
 
   const handleCopyApiKey = () => {
-    navigator.clipboard.writeText('YOUR_API_KEY');
+    const apiKey = apiConfig?.api_key_configured ? 'API_KEY_PLACEHOLDER' : 'Not configured';
+    navigator.clipboard.writeText(apiKey);
     setApiKeyCopied(true);
     setTimeout(() => setApiKeyCopied(false), 2000);
+    toast.success('API key copied to clipboard');
   };
 
   return (
@@ -88,7 +174,7 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
                 <Activity className="w-8 h-8 text-blue-600" />
                 <div>
                   <p className="text-sm text-slate-600">Processed Today</p>
-                  <p className="text-2xl">{processedToday.toLocaleString()}</p>
+                  <p className="text-2xl">{loading ? '...' : (stats?.images_processed_today || 0).toLocaleString()}</p>
                 </div>
               </div>
             </CardContent>
@@ -102,7 +188,7 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
                 </div>
                 <div>
                   <p className="text-sm text-slate-600">Success Rate</p>
-                  <p className="text-2xl">{successRate}%</p>
+                  <p className="text-2xl">{loading ? '...' : (stats?.success_rate || 0).toFixed(1)}%</p>
                 </div>
               </div>
             </CardContent>
@@ -116,7 +202,7 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
                 </div>
                 <div>
                   <p className="text-sm text-slate-600">Errors</p>
-                  <p className="text-2xl">{errors}</p>
+                  <p className="text-2xl">{loading ? '...' : stats?.error_count || 0}</p>
                 </div>
               </div>
             </CardContent>
@@ -128,7 +214,7 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
                 <Users className="w-8 h-8 text-purple-600" />
                 <div>
                   <p className="text-sm text-slate-600">Active Users</p>
-                  <p className="text-2xl">{activeUsers}</p>
+                  <p className="text-2xl">{loading ? '...' : stats?.active_users || 0}</p>
                 </div>
               </div>
             </CardContent>
@@ -152,30 +238,37 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
                   <CardDescription>REST API endpoints for digit recognition</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="bg-slate-900 text-slate-100 p-4 rounded-lg font-mono text-sm">
-                    <p className="text-green-400">POST</p>
-                    <p>https://api.ocr.com/predict</p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>API Key</Label>
-                      <div className="flex gap-2">
-                        <Input 
-                          type={showApiKey ? "text" : "password"}
-                          value={showApiKey ? 'YOUR_API_KEY' : 'sk_live_••••••••••••••••'} 
-                          readOnly 
-                        />
-                        <Button variant="outline" size="icon" onClick={() => setShowApiKey(!showApiKey)}>
-                          {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </Button>
+                  {apiConfig && (
+                    <>
+                      <div className="bg-slate-900 text-slate-100 p-4 rounded-lg font-mono text-sm">
+                        <p className="text-green-400">POST</p>
+                        <p>{apiConfig.api_base_url}/predict</p>
                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Rate Limit</Label>
-                      <Input value="10,000 requests/minute" readOnly />
-                    </div>
-                  </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>API Key</Label>
+                          <div className="flex gap-2">
+                            <Input 
+                              type={showApiKey ? "text" : "password"}
+                              value={showApiKey ? (apiConfig.api_key_configured ? 'API_KEY_PLACEHOLDER' : 'Not configured') : 'sk_live_••••••••••••••••'} 
+                              readOnly 
+                            />
+                            <Button variant="outline" size="icon" onClick={() => setShowApiKey(!showApiKey)}>
+                              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </Button>
+                            <Button variant="outline" size="icon" onClick={handleCopyApiKey}>
+                              {apiKeyCopied ? '✓' : <Key className="w-4 h-4" />}
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Rate Limit</Label>
+                          <Input value={`${apiConfig.rate_limit.toLocaleString()} requests/minute`} readOnly />
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   <div className="space-y-2">
                     <Label>Batch Upload</Label>
@@ -193,32 +286,36 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
                   <CardTitle>Recent API Activity</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Timestamp</TableHead>
-                        <TableHead>Endpoint</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Response Time</TableHead>
-                        <TableHead>Images</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {mockApiLogs.map((log, idx) => (
-                        <TableRow key={idx}>
-                          <TableCell className="text-sm">{log.timestamp}</TableCell>
-                          <TableCell className="font-mono text-sm">{log.endpoint}</TableCell>
-                          <TableCell>
-                            <Badge variant={log.status === 200 ? 'default' : 'destructive'}>
-                              {log.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-sm">{log.responseTime}</TableCell>
-                          <TableCell className="text-sm">{log.images}</TableCell>
+                  {loading ? (
+                    <div className="text-center py-8">Loading API activity...</div>
+                  ) : auditLogs.length === 0 ? (
+                    <div className="text-center py-8 text-slate-500">No API activity logs available</div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Timestamp</TableHead>
+                          <TableHead>Action</TableHead>
+                          <TableHead>User</TableHead>
+                          <TableHead>Type</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {auditLogs.slice(0, 10).map((log, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell className="text-sm">{log.timestamp}</TableCell>
+                            <TableCell className="font-mono text-sm">{log.action}</TableCell>
+                            <TableCell className="text-sm">{log.user_email || 'System'}</TableCell>
+                            <TableCell>
+                              <Badge variant={log.event_type === 'api' ? 'default' : 'secondary'}>
+                                {log.event_type}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -240,46 +337,43 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
                 </div>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {mockUsers.map((user) => (
-                      <TableRow key={user.id}>
-                        <TableCell>{user.name}</TableCell>
-                        <TableCell className="text-sm">{user.email}</TableCell>
-                        <TableCell>
-                          <Select defaultValue={user.role.toLowerCase().replace(' ', '-')}>
-                            <SelectTrigger className="w-40">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="data-scientist">Data Scientist</SelectItem>
-                              <SelectItem value="ml-engineer">ML Engineer</SelectItem>
-                              <SelectItem value="analyst">Analyst</SelectItem>
-                              <SelectItem value="admin">Admin</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={user.status === 'Active' ? 'default' : 'secondary'}>
-                            {user.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="sm" onClick={() => handleEditUser(user)}>Edit</Button>
-                        </TableCell>
+                {loading ? (
+                  <div className="text-center py-8">Loading users...</div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {users.map((user) => (
+                        <TableRow key={user.id}>
+                          <TableCell>{user.name}</TableCell>
+                          <TableCell className="text-sm">{user.email}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{user.role}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={user.is_active ? 'default' : 'secondary'}>
+                              {user.is_active ? 'Active' : 'Inactive'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-2">
+                              <Button variant="ghost" size="sm" onClick={() => handleEditUser(user)}>Edit</Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleDeleteUser(user.id)}>Delete</Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -293,7 +387,7 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
                     <CardTitle>Audit Trail</CardTitle>
                     <CardDescription>Complete system activity log</CardDescription>
                   </div>
-                  <Button variant="outline">
+                  <Button variant="outline" onClick={handleExportAuditLogs}>
                     <Download className="w-4 h-4 mr-2" />
                     Download CSV
                   </Button>
@@ -302,8 +396,13 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
               <CardContent>
                 <div className="space-y-4">
                   <div className="flex gap-4">
-                    <Input placeholder="Search logs..." className="flex-1" />
-                    <Select defaultValue="all">
+                    <Input 
+                      placeholder="Search logs..." 
+                      className="flex-1"
+                      value={auditLogSearch}
+                      onChange={(e) => setAuditLogSearch(e.target.value)}
+                    />
+                    <Select value={auditLogFilter} onValueChange={setAuditLogFilter}>
                       <SelectTrigger className="w-40">
                         <SelectValue />
                       </SelectTrigger>
@@ -316,27 +415,33 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
                     </Select>
                   </div>
 
-                  <div className="border rounded-lg divide-y">
-                    {[
-                      { time: '14:32:15', user: 'john@company.com', action: 'Uploaded 50 images via batch API', type: 'API' },
-                      { time: '14:28:42', user: 'admin@company.com', action: 'Updated user role: jane@company.com', type: 'User' },
-                      { time: '14:15:33', user: 'system', action: 'Model retrained with new dataset', type: 'System' },
-                      { time: '13:58:21', user: 'alice@company.com', action: 'Exported model weights (.pkl)', type: 'API' },
-                      { time: '13:42:19', user: 'bob@company.com', action: 'Viewed confusion matrix', type: 'User' },
-                    ].map((log, idx) => (
-                      <div key={idx} className="p-4 flex items-start gap-4">
-                        <FileText className="w-4 h-4 mt-0.5 text-slate-400" />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-slate-600">{log.time}</span>
-                            <Badge variant="outline" className="text-xs">{log.type}</Badge>
+                  {loading ? (
+                    <div className="text-center py-8">Loading audit logs...</div>
+                  ) : auditLogs.length === 0 ? (
+                    <div className="text-center py-8 text-slate-500">No audit logs available</div>
+                  ) : (
+                    <div className="border rounded-lg divide-y">
+                      {auditLogs
+                        .filter(log => {
+                          if (auditLogFilter !== 'all' && log.event_type !== auditLogFilter) return false;
+                          if (auditLogSearch && !log.action.toLowerCase().includes(auditLogSearch.toLowerCase())) return false;
+                          return true;
+                        })
+                        .map((log, idx) => (
+                          <div key={idx} className="p-4 flex items-start gap-4">
+                            <FileText className="w-4 h-4 mt-0.5 text-slate-400" />
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-slate-600">{log.timestamp}</span>
+                                <Badge variant="outline" className="text-xs">{log.event_type}</Badge>
+                              </div>
+                              <p className="text-sm mt-1">{log.action}</p>
+                              <p className="text-xs text-slate-500 mt-1">by {log.user_email || 'System'}</p>
+                            </div>
                           </div>
-                          <p className="text-sm mt-1">{log.action}</p>
-                          <p className="text-xs text-slate-500 mt-1">by {log.user}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -383,15 +488,23 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Name</Label>
-              <Input placeholder="John Doe" />
+              <Input 
+                placeholder="John Doe" 
+                value={newUserName}
+                onChange={(e) => setNewUserName(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label>Email</Label>
-              <Input placeholder="john@company.com" />
+              <Input 
+                placeholder="john@company.com" 
+                value={newUserEmail}
+                onChange={(e) => setNewUserEmail(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label>Role</Label>
-              <Select defaultValue="data-scientist">
+              <Select value={newUserRole} onValueChange={setNewUserRole}>
                 <SelectTrigger className="w-40">
                   <SelectValue />
                 </SelectTrigger>
@@ -425,15 +538,23 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Name</Label>
-              <Input placeholder="John Doe" value={selectedUser?.name || ''} />
+              <Input 
+                placeholder="John Doe" 
+                value={editUserName}
+                onChange={(e) => setEditUserName(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label>Email</Label>
-              <Input placeholder="john@company.com" value={selectedUser?.email || ''} />
+              <Input 
+                placeholder="john@company.com" 
+                value={editUserEmail}
+                onChange={(e) => setEditUserEmail(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label>Role</Label>
-              <Select defaultValue={selectedUser?.role.toLowerCase().replace(' ', '-') || 'data-scientist'}>
+              <Select value={editUserRole} onValueChange={setEditUserRole}>
                 <SelectTrigger className="w-40">
                   <SelectValue />
                 </SelectTrigger>

@@ -4,6 +4,8 @@ import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Upload, Download, RefreshCw, ArrowLeft } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
+import { predictApi } from '../services/api';
+import { toast } from 'sonner';
 
 interface EndUserUploadProps {
   onBack: () => void;
@@ -30,8 +32,8 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
         };
         reader.readAsDataURL(file);
 
-        // Simulate processing
-        processImage();
+        // Process image with API
+        processImage(file);
       } else {
         alert('File size must be less than 5MB');
       }
@@ -40,24 +42,46 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
     }
   };
 
-  const processImage = () => {
+  const processImage = async (file: File) => {
+    if (!file) return;
+
     setProcessing(true);
     setProgress(0);
 
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setProcessing(false);
-          // Mock prediction
-          const mockDigit = Math.floor(Math.random() * 10);
-          const mockConfidence = 90 + Math.random() * 9;
-          setResult({ digit: mockDigit, confidence: mockConfidence });
-          return 100;
-        }
-        return prev + 5;
-      });
-    }, 50);
+    try {
+      // Simulate progress
+      const progressInterval = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 100);
+
+      // Call prediction API
+      const response = await predictApi.predict(file);
+      
+      clearInterval(progressInterval);
+      setProgress(100);
+
+      if (response.success && response.data) {
+        setResult({
+          digit: response.data.digit,
+          confidence: response.data.confidence * 100, // Convert to percentage
+        });
+        toast.success('Prediction completed successfully');
+      } else {
+        throw new Error('Invalid response from server');
+      }
+    } catch (error: any) {
+      const errorMessage = error.message || 'Failed to process image. Please try again.';
+      toast.error(errorMessage);
+      setResult(null);
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -170,7 +194,22 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
             {/* Action Buttons */}
             {result && (
               <div className="flex gap-4 justify-center">
-                <Button variant="outline">
+                <Button 
+                  variant="outline"
+                  onClick={() => {
+                    const resultText = `Prediction Result:\nDigit: ${result.digit}\nConfidence: ${result.confidence.toFixed(1)}%\n\nGenerated at: ${new Date().toLocaleString()}`;
+                    const blob = new Blob([resultText], { type: 'text/plain' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `prediction_result_${Date.now()}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    toast.success('Result downloaded');
+                  }}
+                >
                   <Download className="w-4 h-4 mr-2" />
                   Download Result
                 </Button>

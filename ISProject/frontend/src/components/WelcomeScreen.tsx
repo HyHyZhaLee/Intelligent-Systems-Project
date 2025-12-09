@@ -4,6 +4,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { UserCircle, Brain, Building2 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { toast } from 'sonner';
 import type { UserRole } from '../App';
 
 interface WelcomeScreenProps {
@@ -15,8 +17,10 @@ export default function WelcomeScreen({ onRoleSelect, onLogin }: WelcomeScreenPr
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [selectedRole, setSelectedRole] = useState<UserRole>('guest');
+  const [isLoading, setIsLoading] = useState(false);
+  const { login } = useAuth();
 
-  const handleSubmit = (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     
     // If guest role is selected, go directly without credentials
@@ -27,7 +31,20 @@ export default function WelcomeScreen({ onRoleSelect, onLogin }: WelcomeScreenPr
     
     // For other roles, require login
     if (email && password) {
-      onLogin(email, password, selectedRole);
+      setIsLoading(true);
+      try {
+        const response = await login(email, password);
+        // The login function in AuthContext will handle navigation
+        // We just need to call onLogin to trigger navigation
+        // The actual user role comes from the backend response
+        onLogin(email, password, selectedRole);
+      } catch (error) {
+        // Error already handled in AuthContext with toast
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      toast.error('Please enter both email and password');
     }
   };
 
@@ -106,7 +123,7 @@ export default function WelcomeScreen({ onRoleSelect, onLogin }: WelcomeScreenPr
             {selectedRole === 'guest' ? (
               <div className="text-center space-y-4">
                 <p className="text-slate-600">Guest access - no login required</p>
-                <Button onClick={handleSubmit} className="w-full" size="lg">
+                <Button onClick={handleSubmit} className="w-full" size="lg" disabled={isLoading}>
                   Continue as Guest
                 </Button>
               </div>
@@ -137,7 +154,9 @@ export default function WelcomeScreen({ onRoleSelect, onLogin }: WelcomeScreenPr
                         className="flex-1"
                         required
                       />
-                      <Button type="submit">Sign In</Button>
+                      <Button type="submit" disabled={isLoading}>
+                        {isLoading ? 'Signing In...' : 'Sign In'}
+                      </Button>
                     </div>
                   </div>
                 </form>
