@@ -171,6 +171,32 @@ The API will be available at:
 
 For now, tables are created automatically via SQLAlchemy. For production, consider using Alembic for migrations.
 
+### Viewing the Database
+
+The database file is located at `ISProject/backend/app.db` (SQLite).
+
+**Option 1: Using the view script**
+```bash
+python3 scripts/view_db.py
+```
+
+**Option 2: Using sqlite3 command line**
+```bash
+cd ISProject/backend
+sqlite3 app.db
+
+# Inside sqlite3:
+.tables                    # List all tables
+.schema                    # Show database schema
+SELECT * FROM users;       # View all users
+.quit                      # Exit
+```
+
+**Option 3: Using GUI tools**
+- **DB Browser for SQLite** (free): https://sqlitebrowser.org/
+- **TablePlus** (macOS): https://tableplus.com/
+- **VS Code**: Install "SQLite Viewer" extension
+
 ### Testing
 
 ```bash
