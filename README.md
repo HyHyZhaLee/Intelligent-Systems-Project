@@ -75,7 +75,7 @@ Intelligent-Systems-Project/
 
 ### Prerequisites
 
-- **Python 3.10+** (for backend)
+- **Python 3.9+** (for backend)
 - **Node.js 18+** and **npm** (for frontend)
 - **Make** (optional, for convenience commands)
 
@@ -186,13 +186,16 @@ Comprehensive documentation is available in the `docs/` folder:
 - **Sonner** - Notifications
 
 ### Backend
-- **FastAPI** - Web framework
-- **Python 3.10+** - Programming language
-- **SQLAlchemy** - ORM
+- **FastAPI 0.109.0** - Web framework
+- **Python 3.9+** - Programming language
+- **Pydantic 2.5.3** - Data validation
+- **SQLAlchemy 2.0.25** - ORM
 - **SQLite** - Database (development)
-- **scikit-learn** - ML models
-- **Pillow** - Image processing
-- **JWT** - Authentication
+- **scikit-learn 1.4.0** - ML models
+- **Pillow 10.2.0** - Image processing
+- **python-jose** - JWT authentication
+- **email-validator** - Email validation for Pydantic
+- **uvicorn** - ASGI server
 
 ## 📝 Development Status
 
@@ -203,6 +206,9 @@ Comprehensive documentation is available in the `docs/` folder:
 - Database models
 - Authentication framework
 - Configuration management
+- Backend server setup and error fixes
+- Pydantic v2 compatibility
+- OpenAPI schema generation
 
 ### ⏳ In Progress / TODO
 - Backend business logic implementation
@@ -279,6 +285,42 @@ This project is part of an Intelligent Systems course at HCMUT.
 - Product Manager
 - System Architect
 - Developers
+
+## 🐛 Troubleshooting
+
+### Backend Issues
+
+**Issue**: `ValueError: "Settings" object has no field "ALLOWED_ORIGINS"`  
+**Solution**: The `ALLOWED_ORIGINS` configuration is automatically parsed from the `.env` file. Ensure your `.env` file has the correct format:
+```env
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+```
+
+**Issue**: `ImportError: email-validator is not installed`  
+**Solution**: Install the missing dependency:
+```bash
+cd ISProject/backend
+pip install email-validator>=2.1.1
+```
+
+**Issue**: `PydanticSerializationError: Unable to serialize unknown type: <class 'ellipsis'>`  
+**Solution**: This has been fixed. If you encounter this, ensure you're using the latest version of the schemas.
+
+**Issue**: `Field "model_type" has conflict with protected namespace "model_"`  
+**Solution**: This warning has been resolved. The models now use `ConfigDict(protected_namespaces=())` to allow `model_type` fields.
+
+### Common Commands
+
+```bash
+# Stop backend server if port is in use
+make stop-backend
+
+# Check if backend is running
+curl http://localhost:8000/health
+
+# View API documentation
+open http://localhost:8000/docs
+```
 
 ## 📞 Support
 
