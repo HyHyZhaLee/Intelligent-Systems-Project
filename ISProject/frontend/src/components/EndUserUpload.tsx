@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
@@ -18,6 +18,8 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<{ digit: number; confidence: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [trainingStatus, setTrainingStatus] = useState<{ status: string; message: string; ready: boolean } | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (file: File) => {
@@ -42,11 +44,87 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
     }
   };
 
-  const processImage = async (file: File) => {
+  // Check training status on component mount and periodically
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const status = await predictApi.getTrainingStatus();
+        setTrainingStatus(status);
+        
+        // If training is in progress, poll every 2 seconds
+        if (status.status === 'in_progress') {
+          const interval = setInterval(async () => {
+            try {
+              const updatedStatus = await predictApi.getTrainingStatus();
+              setTrainingStatus(updatedStatus);
+              if (updatedStatus.status !== 'in_progress') {
+                clearInterval(interval);
+              }
+            } catch (err) {
+              console.error('Error checking training status:', err);
+            }
+          }, 2000);
+          
+          return () => clearInterval(interval);
+        }
+      } catch (error) {
+        console.error('Error checking training status:', error);
+      }
+    };
+    
+    checkStatus();
+  }, []);
+
+  const processImage = async (file: File, retry: boolean = false) => {
     if (!file) return;
+
+    // Check training status before processing (skip check on retry)
+    if (!retry) {
+      try {
+        const status = await predictApi.getTrainingStatus();
+        setTrainingStatus(status);
+        
+        if (!status.ready) {
+          toast.info(status.message || 'Model is not ready. Please wait...');
+          setCheckingStatus(true);
+          
+          // Poll for status until ready
+          const pollInterval = setInterval(async () => {
+            try {
+              const updatedStatus = await predictApi.getTrainingStatus();
+              setTrainingStatus(updatedStatus);
+              
+              if (updatedStatus.ready) {
+                clearInterval(pollInterval);
+                setCheckingStatus(false);
+                // Retry the prediction once ready
+                processImage(file, true);
+              } else if (updatedStatus.status === 'failed') {
+                clearInterval(pollInterval);
+                setCheckingStatus(false);
+                toast.error('Model training failed. Please contact administrator.');
+              }
+            } catch (err) {
+              console.error('Error polling training status:', err);
+            }
+          }, 2000);
+          
+          // Stop polling after 5 minutes
+          setTimeout(() => {
+            clearInterval(pollInterval);
+            setCheckingStatus(false);
+          }, 300000);
+          
+          return;
+        }
+      } catch (error) {
+        console.error('Error checking training status:', error);
+      }
+    }
 
     setProcessing(true);
     setProgress(0);
+    setCheckingStatus(false);
 
     try {
       // Simulate progress
@@ -69,15 +147,27 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
       if (response.success && response.data) {
         setResult({
           digit: response.data.digit,
-          confidence: response.data.confidence * 100, // Convert to percentage
+          confidence: response.data.confidence, // Already a percentage from backend
         });
         toast.success('Prediction completed successfully');
       } else {
         throw new Error('Invalid response from server');
       }
     } catch (error: any) {
-      const errorMessage = error.message || 'Failed to process image. Please try again.';
-      toast.error(errorMessage);
+      // Handle 503 Service Unavailable (training in progress)
+      const errorMessage = error.message || '';
+      if (errorMessage.includes('503') || errorMessage.includes('training') || errorMessage.includes('not ready')) {
+        toast.warning('Model is still training. Please wait and try again.');
+        // Update status and start polling
+        try {
+          const status = await predictApi.getTrainingStatus();
+          setTrainingStatus(status);
+        } catch (err) {
+          console.error('Error checking training status:', err);
+        }
+      } else {
+        toast.error(errorMessage || 'Failed to process image. Please try again.');
+      }
       setResult(null);
     } finally {
       setProcessing(false);
@@ -112,6 +202,55 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
     }
   };
 
+  // Handle clipboard paste
+  const handlePaste = async (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    // Find image in clipboard
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      
+      // Check if item is an image
+      if (item.type.indexOf('image') !== -1) {
+        e.preventDefault();
+        
+        const blob = item.getAsFile();
+        if (!blob) continue;
+
+        // Convert blob to File
+        const file = new File([blob], `pasted-image-${Date.now()}.png`, {
+          type: item.type,
+          lastModified: Date.now(),
+        });
+
+        // Validate file size
+        if (file.size > 5 * 1024 * 1024) {
+          toast.error('Pasted image is too large. Maximum size is 5MB.');
+          return;
+        }
+
+        // Process the pasted image
+        handleFileSelect(file);
+        toast.success('Image pasted from clipboard');
+        return;
+      }
+    }
+  };
+
+  // Add paste event listener
+  useEffect(() => {
+    const handlePasteEvent = (e: ClipboardEvent) => handlePaste(e);
+    
+    // Add event listener to window
+    window.addEventListener('paste', handlePasteEvent);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('paste', handlePasteEvent);
+    };
+  }, []); // Empty dependency array - only set up once
+
   return (
     <div className="min-h-screen p-6">
       <div className="max-w-3xl mx-auto">
@@ -129,17 +268,31 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
             <CardTitle className="text-3xl">Digit Recognition Tool</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Training Status Alert */}
+            {trainingStatus && !trainingStatus.ready && (
+              <Alert className={trainingStatus.status === 'in_progress' ? 'bg-blue-50 border-blue-200' : 'bg-yellow-50 border-yellow-200'}>
+                <AlertDescription>
+                  <div className="flex items-center gap-2">
+                    {trainingStatus.status === 'in_progress' && (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    )}
+                    <p className="font-medium">{trainingStatus.message}</p>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* Upload Area */}
             <div
               className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${
                 isDragging ? 'border-blue-500 bg-blue-50' : 'border-slate-300'
-              }`}
+              } ${trainingStatus && !trainingStatus.ready ? 'opacity-50 pointer-events-none' : ''}`}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
             >
               <Upload className="w-12 h-12 mx-auto mb-4 text-slate-400" />
-              <p className="mb-4">Drag & drop image here or</p>
+              <p className="mb-4">Drag & drop image here, paste from clipboard, or</p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -147,12 +300,19 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
                 onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
                 className="hidden"
                 id="file-upload"
+                disabled={trainingStatus ? !trainingStatus.ready : false}
               />
-              <Button onClick={() => fileInputRef.current?.click()}>
+              <Button 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={trainingStatus ? !trainingStatus.ready : false}
+              >
                 Browse Files
               </Button>
               <p className="text-sm text-slate-500 mt-4">
                 Supported: .png, .jpg, .jpeg – Max 5MB
+              </p>
+              <p className="text-xs text-slate-400 mt-2">
+                💡 Tip: Press Ctrl+V (Cmd+V on Mac) to paste an image from clipboard
               </p>
             </div>
 
@@ -161,6 +321,18 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
               <div className="flex justify-center">
                 <img src={preview} alt="Preview" className="max-w-xs max-h-64 border rounded-lg shadow-md" />
               </div>
+            )}
+
+            {/* Checking Training Status */}
+            {checkingStatus && (
+              <Alert className="bg-blue-50 border-blue-200">
+                <AlertDescription>
+                  <div className="flex items-center gap-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <p>Waiting for model to finish training...</p>
+                  </div>
+                </AlertDescription>
+              </Alert>
             )}
 
             {/* Processing Progress */}

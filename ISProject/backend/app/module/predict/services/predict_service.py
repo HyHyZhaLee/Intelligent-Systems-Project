@@ -38,14 +38,33 @@ class PredictService:
         start_time = time.time()
         
         try:
+            logger.info(
+                f"Starting prediction - filename: {image_file.filename}, "
+                f"model_type: {model_type}, "
+                f"user: {current_user.get('id') if current_user else 'guest'}"
+            )
+            
             # Process uploaded image
             preprocessed_image, filename = await process_uploaded_image(image_file)
             
+            logger.info(
+                f"Image preprocessed successfully - shape: {preprocessed_image.shape}, "
+                f"filename: {filename}"
+            )
+            
             # Run prediction
+            logger.debug(f"Calling predict_digit with model_type: {model_type}")
             predicted_digit, confidence = predict_digit(preprocessed_image, model_type)
             
             # Calculate processing time
             processing_time = int((time.time() - start_time) * 1000)
+            
+            logger.info(
+                f"Prediction completed - digit: {predicted_digit}, "
+                f"confidence: {confidence:.4f} ({confidence*100:.2f}%), "
+                f"processing_time: {processing_time}ms, "
+                f"filename: {filename}"
+            )
             
             # TODO: Log prediction to audit log
             # if current_user:
@@ -59,19 +78,22 @@ class PredictService:
             #     db.add(audit_log)
             #     db.commit()
             
-            logger.info(
-                f"Prediction completed: digit={predicted_digit}, "
-                f"confidence={confidence:.4f}, time={processing_time}ms"
-            )
-            
-            return {
+            result = {
                 "digit": predicted_digit,
                 "confidence": round(confidence * 100, 2),  # Convert to percentage
                 "processing_time_ms": processing_time
             }
+            
+            logger.debug(f"Returning prediction result: {result}")
+            
+            return result
         
         except Exception as e:
-            logger.error(f"Error in predict_image: {str(e)}")
+            logger.error(
+                f"Error in predict_image - filename: {image_file.filename if hasattr(image_file, 'filename') else 'unknown'}, "
+                f"error: {str(e)}, "
+                f"type: {type(e).__name__}"
+            )
             raise
     
     async def create_batch_job(

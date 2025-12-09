@@ -1,108 +1,259 @@
 """
 SVM Service
-Trains and caches SVM model for digit recognition using sklearn's digits dataset
+Trains and caches SVM model for digit recognition using MNIST dataset
+Supports model persistence to avoid retraining on every startup
+Includes background training and feature scaling
 """
 import numpy as np
 from typing import Tuple, Optional
-from sklearn import datasets
+from sklearn.datasets import fetch_openml
 from sklearn.svm import SVC
-from PIL import Image
+from sklearn.preprocessing import StandardScaler
 import logging
 import threading
+import warnings
+import pickle
+import os
+from pathlib import Path
+from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Suppress warnings from fetch_openml
+warnings.filterwarnings('ignore', category=UserWarning)
 
 # Thread-safe model cache
 _model_lock = threading.Lock()
 _model: Optional[SVC] = None
+_scaler: Optional[StandardScaler] = None
+
+# Training status tracking
+_training_status_lock = threading.Lock()
+_training_status = "not_started"  # not_started, in_progress, completed, failed
+
+# Model file paths
+MODEL_FILE = os.path.join(settings.MODELS_DIR, "svm_model.pkl")
+SCALER_FILE = os.path.join(settings.MODELS_DIR, "svm_scaler.pkl")
 
 
 class SVMService:
     """SVM service for digit recognition"""
     
     def __init__(self):
-        """Initialize SVM service, training model if not already cached"""
-        global _model
+        """Initialize SVM service, loading saved model or starting background training"""
+        global _model, _training_status
+        
         if _model is None:
             with _model_lock:
                 # Double-check pattern to avoid race conditions
                 if _model is None:
-                    SVMService._train_model()
+                    # Try to load saved model first
+                    if SVMService._load_model():
+                        logger.info("Loaded pre-trained SVM model from disk")
+                        with _training_status_lock:
+                            _training_status = "completed"
+                    else:
+                        # Model doesn't exist, will be trained in background
+                        logger.info("No saved model found, training will start in background")
+                        with _training_status_lock:
+                            _training_status = "not_started"
+    
+    @staticmethod
+    def get_training_status() -> str:
+        """
+        Get current training status
+        
+        Returns:
+            str: Training status - one of: not_started, in_progress, completed, failed
+        """
+        global _training_status
+        with _training_status_lock:
+            return _training_status
+    
+    @staticmethod
+    def start_background_training():
+        """
+        Start model training in a background thread
+        This allows the app to start up immediately while training happens asynchronously
+        """
+        global _training_status
+        
+        with _training_status_lock:
+            if _training_status == "in_progress":
+                logger.info("Training already in progress, skipping")
+                return
+            if _training_status == "completed":
+                logger.info("Model already trained, skipping")
+                return
+            _training_status = "in_progress"
+        
+        def train_in_background():
+            """Background training function"""
+            global _model, _scaler, _training_status
+            
+            try:
+                logger.info("Starting background training of SVM model...")
+                SVMService._train_model()
+                SVMService._save_model()
+                
+                with _training_status_lock:
+                    _training_status = "completed"
+                logger.info("Background training completed successfully")
+            except Exception as e:
+                logger.error(f"Background training failed: {str(e)}")
+                with _training_status_lock:
+                    _training_status = "failed"
+                # Reset model on failure
+                with _model_lock:
+                    _model = None
+                    _scaler = None
+        
+        # Start training in background thread
+        training_thread = threading.Thread(target=train_in_background, daemon=True)
+        training_thread.start()
+        logger.info("Background training thread started")
+    
+    @staticmethod
+    def _load_model() -> bool:
+        """
+        Load saved model and scaler from disk
+        
+        Returns:
+            True if model and scaler were loaded successfully, False otherwise
+        """
+        global _model, _scaler
+        
+        try:
+            if os.path.exists(MODEL_FILE) and os.path.exists(SCALER_FILE):
+                logger.info(f"Loading SVM model from {MODEL_FILE}...")
+                with open(MODEL_FILE, 'rb') as f:
+                    _model = pickle.load(f)
+                
+                logger.info(f"Loading scaler from {SCALER_FILE}...")
+                with open(SCALER_FILE, 'rb') as f:
+                    _scaler = pickle.load(f)
+                
+                logger.info("Model and scaler loaded successfully")
+                return True
+            else:
+                if not os.path.exists(MODEL_FILE):
+                    logger.info(f"No saved model found at {MODEL_FILE}")
+                if not os.path.exists(SCALER_FILE):
+                    logger.info(f"No saved scaler found at {SCALER_FILE}")
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to load saved model/scaler: {str(e)}")
+            return False
+    
+    @staticmethod
+    def _save_model():
+        """Save trained model and scaler to disk"""
+        global _model, _scaler
+        
+        if _model is None:
+            logger.warning("Cannot save model: model is not trained")
+            return
+        
+        if _scaler is None:
+            logger.warning("Cannot save scaler: scaler is not fitted")
+            return
+        
+        try:
+            # Ensure models directory exists
+            os.makedirs(settings.MODELS_DIR, exist_ok=True)
+            
+            logger.info(f"Saving SVM model to {MODEL_FILE}...")
+            with open(MODEL_FILE, 'wb') as f:
+                pickle.dump(_model, f)
+            
+            logger.info(f"Saving scaler to {SCALER_FILE}...")
+            with open(SCALER_FILE, 'wb') as f:
+                pickle.dump(_scaler, f)
+            
+            logger.info("Model and scaler saved successfully")
+        except Exception as e:
+            logger.error(f"Failed to save model/scaler: {str(e)}")
     
     @staticmethod
     def _train_model():
         """
-        Train SVM model on sklearn digits dataset
-        Upscales 8x8 images to 28x28 to match preprocessing format
+        Train SVM model on MNIST dataset (real handwritten digits)
+        Uses optimized hyperparameters and feature scaling for better accuracy
         """
-        global _model
+        global _model, _scaler
         
-        logger.info("Training SVM model on sklearn digits dataset...")
+        logger.info("Training SVM model on MNIST dataset...")
         
         try:
-            # Load sklearn digits dataset (8x8 images, 10 classes 0-9)
-            digits = datasets.load_digits()
-            X_train = digits.data  # Shape: (1797, 64) - flattened 8x8 images
-            y_train = digits.target  # Shape: (1797,) - labels 0-9
+            # Load MNIST dataset (real handwritten digits, 28x28 images)
+            # This downloads on first run and may take a few minutes
+            # Using 'liac-arff' parser to avoid pandas dependency
+            logger.info("Downloading/loading MNIST dataset from OpenML...")
+            mnist = fetch_openml('mnist_784', version=1, as_frame=False, parser='liac-arff')
             
-            logger.info(f"Loaded {len(X_train)} training samples")
+            X_full = mnist.data.astype(np.float32)
+            y_full = mnist.target.astype(int)
             
-            # Upscale 8x8 images to 28x28 to match preprocessing format
-            X_train_28x28 = SVMService._upscale_images(X_train)
+            logger.info(f"MNIST dataset loaded: {len(X_full)} samples")
             
-            logger.info("Training SVM classifier...")
+            # Use larger subset for better accuracy
+            # Since training runs in background, we can use more samples
+            # Increased to 20000 for significantly better accuracy
+            # Training time will be longer (~5-8 minutes) but accuracy should improve to ~95-96%+
+            # Using 20k samples provides good balance between accuracy and training time
+            sample_size = 20000
+            if len(X_full) > sample_size:
+                # Use stratified sampling to ensure balanced classes
+                from sklearn.model_selection import train_test_split
+                X_subset, _, y_subset, _ = train_test_split(
+                    X_full, y_full, 
+                    train_size=sample_size, 
+                    stratify=y_full,
+                    random_state=42
+                )
+                X_train = X_subset
+                y_train = y_subset
+                logger.info(f"Using subset of {sample_size} samples for training")
+            else:
+                X_train = X_full
+                y_train = y_full
             
-            # Train SVM with RBF kernel and probability estimates
+            # Normalize pixel values to [0, 1] (MNIST is already 0-255)
+            X_train = X_train / 255.0
+            
+            # Apply feature scaling (StandardScaler) - critical for good performance
+            # This standardizes features to have mean=0 and std=1
+            logger.info("Fitting StandardScaler on training data...")
+            _scaler = StandardScaler()
+            X_train_scaled = _scaler.fit_transform(X_train)
+            
+            logger.info(f"Training SVM classifier on {len(X_train)} samples...")
+            logger.info("Using optimized hyperparameters: C=10, gamma=0.001")
+            logger.info(f"This may take 5-8 minutes depending on your system (training {len(X_train)} samples)...")
+            
+            # Train SVM with RBF kernel and optimized hyperparameters
+            # Based on GridSearchCV results from lab notebook:
+            # C=10, gamma=0.001 showed ~94% accuracy vs ~91% with defaults
             _model = SVC(
                 kernel='rbf',
-                C=1.0,
-                gamma='scale',
+                C=10,  # Optimized from default 1.0
+                gamma=0.001,  # Optimized from 'scale'
                 probability=True,
-                random_state=42
+                random_state=42,
+                verbose=False
             )
             
-            _model.fit(X_train_28x28, y_train)
+            _model.fit(X_train_scaled, y_train)
             
             logger.info("SVM model training completed successfully")
+            logger.info(f"Model trained on {len(X_train)} real handwritten digit samples from MNIST")
+            logger.info("Feature scaling applied for improved accuracy")
             
         except Exception as e:
             logger.error(f"Error training SVM model: {str(e)}")
+            logger.error("If this is the first run, MNIST dataset download may take a few minutes")
             raise ValueError(f"Failed to train SVM model: {str(e)}")
     
-    @staticmethod
-    def _upscale_images(images_8x8: np.ndarray) -> np.ndarray:
-        """
-        Upscale images from 8x8 to 28x28 using PIL
-        
-        Args:
-            images_8x8: Array of shape (n_samples, 64) - flattened 8x8 images
-        
-        Returns:
-            Array of shape (n_samples, 784) - flattened 28x28 images
-        """
-        n_samples = images_8x8.shape[0]
-        images_28x28 = []
-        
-        for i in range(n_samples):
-            # Reshape to 8x8
-            img_8x8 = images_8x8[i].reshape(8, 8)
-            
-            # Normalize to 0-255 range (sklearn digits are 0-16)
-            img_8x8 = (img_8x8 / 16.0 * 255.0).astype(np.uint8)
-            
-            # Convert to PIL Image
-            pil_img = Image.fromarray(img_8x8, mode='L')
-            
-            # Upscale to 28x28 using LANCZOS resampling
-            pil_img_28x28 = pil_img.resize((28, 28), Image.Resampling.LANCZOS)
-            
-            # Convert back to numpy array and normalize to [0, 1]
-            img_28x28 = np.array(pil_img_28x28, dtype=np.float32) / 255.0
-            
-            # Flatten to (784,)
-            images_28x28.append(img_28x28.flatten())
-        
-        return np.array(images_28x28)
     
     def predict(self, image_array: np.ndarray) -> Tuple[int, float]:
         """
@@ -115,28 +266,69 @@ class SVMService:
             tuple: (predicted_digit, confidence_score)
                 - predicted_digit: Integer from 0-9
                 - confidence_score: Float from 0.0 to 1.0
-        """
-        global _model
         
-        if _model is None:
-            raise ValueError("SVM model not initialized. Call _train_model() first.")
+        Raises:
+            ValueError: If model is not ready or training is in progress
+        """
+        global _model, _scaler, _training_status
+        
+        # Check training status
+        with _training_status_lock:
+            status = _training_status
+        
+        if status == "in_progress":
+            raise ValueError("Model is currently training. Please wait for training to complete.")
+        
+        if status == "failed":
+            raise ValueError("Model training failed. Please retry or check logs.")
+        
+        if _model is None or _scaler is None:
+            if status == "not_started":
+                raise ValueError("Model training has not started. Please wait.")
+            raise ValueError("SVM model or scaler not initialized.")
         
         try:
+            # Log input details
+            logger.info(
+                f"SVM prediction input - shape: {image_array.shape}, "
+                f"ndim: {image_array.ndim}, "
+                f"dtype: {image_array.dtype}, "
+                f"min: {image_array.min():.4f}, max: {image_array.max():.4f}"
+            )
+            
             # Ensure correct shape: (1, 784)
             if image_array.ndim == 1:
                 image_array = image_array.reshape(1, -1)
+                logger.debug(f"Reshaped 1D array to 2D: {image_array.shape}")
             elif image_array.shape[1] != 784:
+                logger.error(f"Invalid image array shape: {image_array.shape}, expected (1, 784) or (784,)")
                 raise ValueError(f"Expected image array of shape (1, 784), got {image_array.shape}")
             
+            # Validate shape before prediction
+            if image_array.shape != (1, 784):
+                logger.error(f"Final shape validation failed: {image_array.shape}, expected (1, 784)")
+                raise ValueError(f"Image array must have shape (1, 784), got {image_array.shape}")
+            
+            # Apply feature scaling (same as training data)
+            image_array_scaled = _scaler.transform(image_array)
+            
+            logger.debug("Applied feature scaling before prediction")
+            
             # Run prediction
-            prediction = _model.predict(image_array)
+            logger.debug("Running SVM model prediction...")
+            prediction = _model.predict(image_array_scaled)
             predicted_digit = int(prediction[0])
             
             # Get confidence score using predict_proba
-            probabilities = _model.predict_proba(image_array)
+            probabilities = _model.predict_proba(image_array_scaled)
             confidence = float(probabilities[0][predicted_digit])
             
-            logger.debug(f"Prediction: digit={predicted_digit}, confidence={confidence:.4f}")
+            # Log full probability distribution for debugging
+            logger.info(
+                f"SVM prediction result - digit: {predicted_digit}, "
+                f"confidence: {confidence:.4f}, "
+                f"all probabilities: {probabilities[0]}"
+            )
             
             return predicted_digit, confidence
         

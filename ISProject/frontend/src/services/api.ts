@@ -129,6 +129,10 @@ export const predictApi = {
     return apiUpload<import('../types/api').PredictionResponse>('/predict', formData);
   },
 
+  getTrainingStatus: async () => {
+    return apiRequest<{ status: string; message: string; ready: boolean }>('/predict/status');
+  },
+
   batchPredict: async (files: File[]) => {
     const formData = new FormData();
     files.forEach((file) => {

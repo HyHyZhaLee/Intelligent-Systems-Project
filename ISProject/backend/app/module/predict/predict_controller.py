@@ -10,6 +10,7 @@ from app.module.predict.schemas import (
 )
 from app.module.predict.services.predict_service import PredictService
 from app.core.dependencies import get_optional_auth
+from app.shared.ml.svm_service import SVMService
 from datetime import datetime
 from typing import Optional, List
 import logging
@@ -18,6 +19,30 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 predict_service = PredictService()
+
+
+@router.get("/predict/status", status_code=status.HTTP_200_OK)
+async def get_training_status():
+    """
+    Get SVM model training status
+    
+    Returns:
+        dict with training status and message
+    """
+    training_status = SVMService.get_training_status()
+    
+    status_messages = {
+        "not_started": "Model training has not started yet",
+        "in_progress": "Model is currently training. Please wait...",
+        "completed": "Model is ready for predictions",
+        "failed": "Model training failed. Please check logs or retry."
+    }
+    
+    return {
+        "status": training_status,
+        "message": status_messages.get(training_status, "Unknown status"),
+        "ready": training_status == "completed"
+    }
 
 
 @router.post("/predict", response_model=PredictionResponse, status_code=status.HTTP_200_OK)
@@ -35,7 +60,41 @@ async def predict_digit(
     
     Authentication: Optional (guest access allowed)
     Rate limit: 100 requests/minute (guest), 10,000/minute (authenticated)
+    
+    Returns 503 Service Unavailable if model is still training
     """
+    # Check training status first
+    training_status = SVMService.get_training_status()
+    
+    if training_status == "in_progress":
+        logger.info("Prediction request received but model is still training")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model is currently training. Please wait for training to complete and try again."
+        )
+    
+    if training_status == "failed":
+        logger.warning("Prediction request received but model training failed")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model training failed. Please check server logs or contact administrator."
+        )
+    
+    if training_status == "not_started":
+        logger.warning("Prediction request received but model training has not started")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model training has not started. Please wait for training to begin."
+        )
+    
+    # Log file receipt details
+    # Note: FastAPI UploadFile doesn't have size attribute until read
+    # We'll log size after reading in image_service
+    logger.info(
+        f"Received prediction request - filename: {file.filename}, "
+        f"content_type: {file.content_type}"
+    )
+    
     result = await predict_service.predict_image(file, current_user, db)
     return PredictionResponse(
         success=True,

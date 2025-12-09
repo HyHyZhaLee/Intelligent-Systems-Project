@@ -7,9 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.core.exceptions import setup_exception_handlers
 from app.core.logging import setup_logging
+import logging
 
 # Initialize logging
 setup_logging()
+logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
@@ -42,6 +44,26 @@ app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(predict_router, prefix="/api", tags=["Prediction"])
 app.include_router(models_router, prefix="/api/models", tags=["Models"])
 app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on app startup"""
+    from app.shared.ml.svm_service import SVMService
+    
+    # Initialize SVM service - this will load model if exists
+    svm_service = SVMService()
+    
+    # Check if model needs training
+    training_status = SVMService.get_training_status()
+    if training_status == "not_started":
+        # Start background training
+        logger.info("Starting background training of SVM model...")
+        SVMService.start_background_training()
+    elif training_status == "completed":
+        logger.info("SVM model is ready")
+    else:
+        logger.info(f"SVM model status: {training_status}")
 
 
 @app.get("/health", tags=["Health Check"])
