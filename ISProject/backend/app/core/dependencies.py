@@ -28,15 +28,18 @@ def get_current_user(
     if user_id is None:
         raise AuthenticationError("Invalid token payload")
     
-    # TODO: Load user from database
-    # from app.shared.models.user import User
-    # user = db.query(User).filter(User.id == user_id).first()
-    # if not user or not user.is_active:
-    #     raise AuthenticationError("User not found or inactive")
-    # return user
+    # Load user from database
+    from app.shared.models.user import User
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    if not user or not user.is_active:
+        raise AuthenticationError("User not found or inactive")
     
-    # Placeholder return
-    return {"id": user_id, "email": payload.get("email"), "role": payload.get("role")}
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role
+    }
 
 
 def get_current_admin_user(current_user: dict = Depends(get_current_user)):

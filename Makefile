@@ -1,9 +1,10 @@
-.PHONY: install install-backend install-frontend dev-all dev-backend dev-frontend clean help
+.PHONY: install install-backend install-frontend dev-all dev-backend dev-frontend clean help stop-backend stop-frontend stop-all
 
 # Colors for output
 BLUE := \033[0;34m
 GREEN := \033[0;32m
 YELLOW := \033[0;33m
+RED := \033[0;31m
 NC := \033[0m # No Color
 
 # Directories
@@ -34,8 +35,40 @@ install-frontend: ## Install frontend dependencies
 	npm install && \
 	echo "$(GREEN)✓ Frontend dependencies installed$(NC)"
 
+stop-backend: ## Stop backend server on port 8000
+	@if lsof -ti:8000 >/dev/null 2>&1; then \
+		echo "$(YELLOW)Stopping backend server on port 8000...$(NC)"; \
+		lsof -ti:8000 | xargs kill -9 2>/dev/null && \
+		echo "$(GREEN)✓ Backend server stopped$(NC)" || \
+		echo "$(RED)✗ Failed to stop backend server$(NC)"; \
+	else \
+		echo "$(YELLOW)No process found on port 8000$(NC)"; \
+	fi
+
+stop-frontend: ## Stop frontend server on port 3000
+	@if lsof -ti:3000 >/dev/null 2>&1; then \
+		echo "$(YELLOW)Stopping frontend server on port 3000...$(NC)"; \
+		lsof -ti:3000 | xargs kill -9 2>/dev/null && \
+		echo "$(GREEN)✓ Frontend server stopped$(NC)" || \
+		echo "$(RED)✗ Failed to stop frontend server$(NC)"; \
+	else \
+		echo "$(YELLOW)No process found on port 3000$(NC)"; \
+	fi
+
+stop-all: stop-backend stop-frontend ## Stop both backend and frontend servers
+
 dev-all: ## Run both frontend and backend concurrently
 	@echo "$(BLUE)Starting development servers...$(NC)"
+	@if lsof -ti:8000 >/dev/null 2>&1; then \
+		echo "$(YELLOW)⚠ Port 8000 is already in use, killing existing process...$(NC)"; \
+		lsof -ti:8000 | xargs kill -9 2>/dev/null || true; \
+		sleep 1; \
+	fi
+	@if lsof -ti:3000 >/dev/null 2>&1; then \
+		echo "$(YELLOW)⚠ Port 3000 is already in use, killing existing process...$(NC)"; \
+		lsof -ti:3000 | xargs kill -9 2>/dev/null || true; \
+		sleep 1; \
+	fi
 	@echo "$(YELLOW)Backend: http://localhost:8000$(NC)"
 	@echo "$(YELLOW)Frontend: http://localhost:3000$(NC)"
 	@echo "$(YELLOW)API Docs: http://localhost:8000/docs$(NC)"
@@ -47,12 +80,24 @@ dev-all: ## Run both frontend and backend concurrently
 
 dev-backend: ## Run backend only
 	@echo "$(BLUE)Starting backend server...$(NC)"
+	@if lsof -ti:8000 >/dev/null 2>&1; then \
+		echo "$(YELLOW)⚠ Port 8000 is already in use$(NC)"; \
+		echo "$(YELLOW)Killing existing process on port 8000...$(NC)"; \
+		lsof -ti:8000 | xargs kill -9 2>/dev/null || true; \
+		sleep 1; \
+	fi
 	@echo "$(YELLOW)Backend: http://localhost:8000$(NC)"
 	@echo "$(YELLOW)API Docs: http://localhost:8000/docs$(NC)"
 	@cd $(BACKEND_DIR) && python3 -m uvicorn app.main:app --reload --port 8000
 
 dev-frontend: ## Run frontend only
 	@echo "$(BLUE)Starting frontend server...$(NC)"
+	@if lsof -ti:3000 >/dev/null 2>&1; then \
+		echo "$(YELLOW)⚠ Port 3000 is already in use$(NC)"; \
+		echo "$(YELLOW)Killing existing process on port 3000...$(NC)"; \
+		lsof -ti:3000 | xargs kill -9 2>/dev/null || true; \
+		sleep 1; \
+	fi
 	@echo "$(YELLOW)Frontend: http://localhost:3000$(NC)"
 	@cd $(FRONTEND_DIR) && npm run dev
 
@@ -68,10 +113,15 @@ clean: ## Clean generated files and caches
 	@rm -rf $(FRONTEND_DIR)/dist 2>/dev/null || true
 	@echo "$(GREEN)✓ Clean complete$(NC)"
 
-init-db: ## Initialize database (create tables)
+init-db: ## Initialize database (create tables and sample users)
 	@echo "$(BLUE)Initializing database...$(NC)"
-	@cd $(BACKEND_DIR) && python3 -c "from app.database import init_db; init_db()" && \
+	@cd $(BACKEND_DIR) && python3 scripts/init_db.py && \
 	echo "$(GREEN)✓ Database initialized$(NC)"
+
+train-model: ## Train pre-trained SVM model
+	@echo "$(BLUE)Training SVM model...$(NC)"
+	@cd $(BACKEND_DIR) && python3 scripts/train_model.py && \
+	echo "$(GREEN)✓ Model trained$(NC)"
 
 check: ## Check if dependencies are installed
 	@echo "$(BLUE)Checking dependencies...$(NC)"

@@ -2,14 +2,21 @@
 Configuration Management
 Loads settings from environment variables
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
-import os
 from pathlib import Path
+import os
 
 
 class Settings(BaseSettings):
     """Application settings loaded from .env file"""
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore"  # Ignore extra fields from .env that aren't defined
+    )
     
     # Database
     DATABASE_URL: str = "sqlite:///./app.db"
@@ -31,21 +38,21 @@ class Settings(BaseSettings):
     UPLOADS_DIR: str = "./uploads"
     MODELS_DIR: str = "./models"
     
-    # CORS
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
-    
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
 
 
 # Create settings instance
 settings = Settings()
+
+# Parse ALLOWED_ORIGINS manually from environment (after Settings is created)
+# This avoids Pydantic validation issues with comma-separated strings
+_allowed_origins_str = os.getenv('ALLOWED_ORIGINS', "http://localhost:5173,http://localhost:3000")
+# Use object.__setattr__ to bypass Pydantic's attribute setting restrictions
+object.__setattr__(settings, 'ALLOWED_ORIGINS', [
+    origin.strip() for origin in _allowed_origins_str.split(',') if origin.strip()
+])
 
 # Ensure directories exist
 Path(settings.UPLOADS_DIR).mkdir(parents=True, exist_ok=True)

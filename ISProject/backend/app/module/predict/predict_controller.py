@@ -12,6 +12,9 @@ from app.module.predict.services.predict_service import PredictService
 from app.core.dependencies import get_optional_auth
 from datetime import datetime
 from typing import Optional, List
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 predict_service = PredictService()
@@ -33,29 +36,10 @@ async def predict_digit(
     Authentication: Optional (guest access allowed)
     Rate limit: 100 requests/minute (guest), 10,000/minute (authenticated)
     """
-    # Validate file type
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be an image"
-        )
-    
-    # TODO: Implement prediction logic
-    # result = await predict_service.predict_image(file, current_user, db)
-    # return PredictionResponse(
-    #     success=True,
-    #     data=result,
-    #     timestamp=datetime.utcnow().isoformat()
-    # )
-    
+    result = await predict_service.predict_image(file, current_user, db)
     return PredictionResponse(
         success=True,
-        data={
-            "digit": 5,
-            "confidence": 0.95,
-            "processing_time_ms": 150
-        },
-        message="Prediction endpoint - implementation pending",
+        data=result,
         timestamp=datetime.utcnow().isoformat()
     )
 

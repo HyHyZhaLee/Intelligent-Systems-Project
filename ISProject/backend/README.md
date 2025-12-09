@@ -136,13 +136,27 @@ The API will be available at:
 
 ## Implementation Status
 
-All endpoints are **defined and structured** but **implementation is pending**. Each endpoint includes:
-- ✅ Route definition
-- ✅ Request/response schemas
-- ✅ Authentication/authorization dependencies
-- ✅ Service layer stubs
-- ⏳ Business logic (TODO comments)
-- ⏳ Database operations (TODO comments)
+### ✅ Completed (Sprint 1 & 2)
+- ✅ FastAPI project structure
+- ✅ Database models and initialization
+- ✅ Configuration management (.env)
+- ✅ Error handling framework
+- ✅ Logging system
+- ✅ **Authentication service** (login, JWT generation, password verification)
+- ✅ **User loading from database** in dependencies
+- ✅ **ML model loading service** with caching
+- ✅ **Image preprocessing** (resize, grayscale, normalize)
+- ✅ **ML inference service** for predictions
+- ✅ **Prediction endpoint** with real ML inference
+
+### ⏳ In Progress / Pending
+- ⏳ Model training script execution (needs MNIST dataset)
+- ⏳ Audit logging for predictions
+- ⏳ Model metrics calculation
+- ⏳ User management CRUD operations
+- ⏳ Batch processing
+- ⏳ Model management endpoints (metrics, confusion matrix, ROC curves)
+- ⏳ Admin endpoints (stats, audit logs, batch jobs)
 
 ## Development
 
@@ -176,12 +190,44 @@ curl http://localhost:8000/health
 - API keys in `X-API-Key: <key>` header
 - CORS configured for frontend origins
 
+## Quick Start
+
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Initialize database:**
+   ```bash
+   python3 scripts/init_db.py
+   ```
+   This creates tables and sample users:
+   - `datascientist@example.com` / `password123`
+   - `admin@example.com` / `password123`
+
+3. **Train model (optional, for testing):**
+   ```bash
+   python3 scripts/train_model.py
+   ```
+   This downloads MNIST dataset and trains an SVM model.
+
+4. **Start server:**
+   ```bash
+   python3 -m uvicorn app.main:app --reload
+   ```
+
+5. **Test endpoints:**
+   - Health: http://localhost:8000/health
+   - Docs: http://localhost:8000/docs
+   - Login: `POST /api/auth/login` with sample user credentials
+   - Predict: `POST /api/predict` with an image file
+
 ## Next Steps
 
-1. Implement authentication service (login, JWT generation)
-2. Implement image preprocessing and ML inference
-3. Implement model metrics calculation
-4. Implement user management CRUD operations
-5. Implement audit logging
-6. Add unit tests
-7. Add integration tests
+1. ✅ ~~Implement authentication service~~ - **DONE**
+2. ✅ ~~Implement image preprocessing and ML inference~~ - **DONE**
+3. ⏳ Implement model metrics calculation
+4. ⏳ Implement user management CRUD operations
+5. ⏳ Add audit logging
+6. ⏳ Add unit tests
+7. ⏳ Add integration tests

@@ -31,5 +31,9 @@ def get_db():
 
 def init_db():
     """Initialize database - create all tables"""
-    from app.shared.models import user, audit_log, batch_job, model_metadata
+    # Import all models to ensure they're registered with Base
+    from app.shared.models.user import User
+    from app.shared.models.audit_log import AuditLog
+    from app.shared.models.batch_job import BatchJob
+    from app.shared.models.model_metadata import ModelMetadata
     Base.metadata.create_all(bind=engine)

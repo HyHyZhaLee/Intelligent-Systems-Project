@@ -30,27 +30,11 @@ async def login(
     
     Returns JWT token and user information
     """
-    # TODO: Implement login logic
-    # result = await auth_service.login(request.email, request.password, db)
-    # return LoginResponse(
-    #     success=True,
-    #     data=result,
-    #     message="Login successful",
-    #     timestamp=datetime.utcnow().isoformat()
-    # )
-    
+    result = await auth_service.login(request.email, request.password, db)
     return LoginResponse(
         success=True,
-        data={
-            "token": "placeholder_token",
-            "user": {
-                "id": 1,
-                "email": request.email,
-                "name": "Placeholder User",
-                "role": "data-scientist"
-            }
-        },
-        message="Login endpoint - implementation pending",
+        data=result,
+        message="Login successful",
         timestamp=datetime.utcnow().isoformat()
     )
 
@@ -84,10 +68,10 @@ async def refresh_token(
     
     Returns new access token
     """
-    # TODO: Implement token refresh logic
+    result = await auth_service.refresh_token(request.refresh_token, db)
     return RefreshTokenResponse(
         success=True,
-        data={"token": "new_access_token"},
+        data=result,
         timestamp=datetime.utcnow().isoformat()
     )
 
@@ -102,16 +86,22 @@ async def get_current_user_info(
     
     Returns information about the authenticated user
     """
-    # TODO: Load full user info from database
+    # Load full user info from database
+    from app.shared.models.user import User
+    user = db.query(User).filter(User.id == current_user["id"]).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
     return UserInfoResponse(
         success=True,
         data={
-            "id": current_user.get("id", 1),
-            "email": current_user.get("email", "user@example.com"),
-            "name": "Placeholder User",
-            "role": current_user.get("role", "data-scientist"),
-            "is_active": True,
-            "created_at": datetime.utcnow()
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "is_active": user.is_active,
+            "created_at": user.created_at
         },
         timestamp=datetime.utcnow().isoformat()
     )
