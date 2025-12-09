@@ -44,17 +44,7 @@ app.include_router(models_router, prefix="/api/models", tags=["Models"])
 app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 
 
-@app.get("/health")
+@app.get("/health", tags=["Health Check"])
 async def health_check():
     """Health check endpoint"""
     return {"status": "ok", "service": "digit-ocr-api"}
-
-
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "message": "Handwritten Digit OCR API",
-        "version": "1.0.0",
-        "docs": "/docs"
-    }
