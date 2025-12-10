@@ -10,7 +10,6 @@ NC := \033[0m # No Color
 # Directories (use absolute paths to avoid cwd issues)
 BACKEND_DIR := $(abspath ISProject/backend)
 FRONTEND_DIR := $(abspath ISProject/frontend)
-VENV_PYTHON := $(BACKEND_DIR)/venv/bin/python
 
 help: ## Show this help message
 	@echo "$(BLUE)Available commands:$(NC)"
@@ -89,8 +88,12 @@ dev-all: ## Run both frontend and backend concurrently
 	@echo "$(YELLOW)API Docs: http://localhost:8000/docs$(NC)"
 	@echo "$(YELLOW)Press Ctrl+C to stop all servers$(NC)"
 	@bash -c "trap 'kill 0' EXIT INT TERM; \
-	cd \"$(BACKEND_DIR)\" && \"$(VENV_PYTHON)\" -m uvicorn app.main:app --reload --port 8000 & \
-	cd \"$(FRONTEND_DIR)\" && npm run dev & \
+	if [ -f \"$(BACKEND_DIR)/venv/bin/python\" ]; then \
+		(cd \"$(BACKEND_DIR)\" && \"$(BACKEND_DIR)/venv/bin/python\" -u -m uvicorn app.main:app --reload --port 8000) 2>&1 | sed 's/^/[BACKEND] /' & \
+	else \
+		(cd \"$(BACKEND_DIR)\" && python3 -u -m uvicorn app.main:app --reload --port 8000) 2>&1 | sed 's/^/[BACKEND] /' & \
+	fi; \
+	(cd \"$(FRONTEND_DIR)\" && npm run dev) 2>&1 | sed 's/^/[FRONTEND] /' & \
 	wait"
 
 dev-backend: ## Run backend only
@@ -103,7 +106,11 @@ dev-backend: ## Run backend only
 	fi
 	@echo "$(YELLOW)Backend: http://localhost:8000$(NC)"
 	@echo "$(YELLOW)API Docs: http://localhost:8000/docs$(NC)"
-	@cd "$(BACKEND_DIR)" && "$(VENV_PYTHON)" -m uvicorn app.main:app --reload --port 8000
+	@if [ -f "$(BACKEND_DIR)/venv/bin/python" ]; then \
+		cd "$(BACKEND_DIR)" && "$(BACKEND_DIR)/venv/bin/python" -m uvicorn app.main:app --reload --port 8000; \
+	else \
+		cd "$(BACKEND_DIR)" && python3 -m uvicorn app.main:app --reload --port 8000; \
+	fi
 
 dev-frontend: ## Run frontend only
 	@echo "$(BLUE)Starting frontend server...$(NC)"
