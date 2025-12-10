@@ -122,15 +122,18 @@ async def get_confusion_matrix(
     
     Returns 10x10 confusion matrix for digits 0-9
     """
-    # TODO: Implement confusion matrix retrieval
-    return ConfusionMatrixResponse(
-        success=True,
-        data={
-            "matrix": [[100] * 10 for _ in range(10)],  # Placeholder
-            "labels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        },
-        timestamp=datetime.utcnow().isoformat()
-    )
+    try:
+        cm_data = await models_service.get_confusion_matrix(model_id, db)
+        return ConfusionMatrixResponse(
+            success=True,
+            data=cm_data,
+            timestamp=datetime.utcnow().isoformat()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve confusion matrix: {str(e)}"
+        )
 
 
 @router.get("/{model_id}/roc-curve", response_model=ROCCurveResponse, status_code=status.HTTP_200_OK)
@@ -244,18 +247,37 @@ async def export_model(
     
     Returns downloadable .pkl file with model weights and metadata
     """
-    # TODO: Implement model export
-    # model_path = await models_service.export_model(model_id, db)
-    # return FileResponse(
-    #     path=model_path,
-    #     filename=f"model_{model_id}.pkl",
-    #     media_type="application/octet-stream"
-    # )
-    
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Model export - implementation pending"
-    )
+    try:
+        model_path = await models_service.export_model(model_id, db)
+        
+        # Get model type for filename (try to get from database, fallback to 'svm')
+        from app.shared.models.model_metadata import ModelMetadata
+        model_metadata = db.query(ModelMetadata).filter(
+            ModelMetadata.id == model_id
+        ).first()
+        
+        if model_metadata:
+            model_type = model_metadata.model_type
+        else:
+            model_type = "svm"  # Default since we only support SVM currently
+        
+        filename = f"{model_type}_model_{model_id}.pkl"
+        
+        return FileResponse(
+            path=model_path,
+            filename=filename,
+            media_type="application/octet-stream"
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export model: {str(e)}"
+        )
 
 
 @router.post("/train", response_model=TrainModelResponse, status_code=status.HTTP_202_ACCEPTED)
