@@ -41,6 +41,8 @@ export default function EnterprisePortal({ user }: EnterprisePortalProps) {
   const [apiKeyCopied, setApiKeyCopied] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [newUserRole, setNewUserRole] = useState('data-scientist');
   const [editUserName, setEditUserName] = useState('');
   const [editUserEmail, setEditUserEmail] = useState('');
@@ -87,16 +89,23 @@ export default function EnterprisePortal({ user }: EnterprisePortalProps) {
       return;
     }
     try {
-      const response = await adminApi.createUser({
+      const userData: any = {
         name: newUserName,
         email: newUserEmail,
         role: newUserRole,
-      });
+      };
+      // Include password only if provided
+      if (newUserPassword) {
+        userData.password = newUserPassword;
+      }
+      
+      const response = await adminApi.createUser(userData);
       if (response.success) {
         toast.success('User added successfully!');
         setAddUserDialogOpen(false);
         setNewUserName('');
         setNewUserEmail('');
+        setNewUserPassword('');
         setNewUserRole('data-scientist');
         // Refresh users list
         const usersRes = await adminApi.listUsers();
@@ -509,6 +518,27 @@ export default function EnterprisePortal({ user }: EnterprisePortalProps) {
                 value={newUserEmail}
                 onChange={(e) => setNewUserEmail(e.target.value)}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Password (Optional)</Label>
+              <div className="flex gap-2">
+                <Input 
+                  type={showNewUserPassword ? "text" : "password"}
+                  placeholder="Leave empty to generate random password" 
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  className="flex-1"
+                />
+                <Button 
+                  variant="outline" 
+                  size="icon" 
+                  type="button"
+                  onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                >
+                  {showNewUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">If not provided, a random password will be generated</p>
             </div>
             <div className="space-y-2">
               <Label>Role</Label>

@@ -10,6 +10,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     name: str
     role: str  # 'data-scientist', 'admin', 'ml-engineer', 'analyst'
+    password: Optional[str] = None  # Optional - will generate random if not provided
 
 
 class UserUpdate(BaseModel):
@@ -17,6 +18,7 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    password: Optional[str] = None  # Optional - will hash if provided
 
 
 class UserInfo(BaseModel):
@@ -26,6 +28,7 @@ class UserInfo(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class UserListResponse(BaseModel):

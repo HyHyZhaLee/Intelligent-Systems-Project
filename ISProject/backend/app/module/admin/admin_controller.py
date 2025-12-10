@@ -13,6 +13,7 @@ from app.module.admin.schemas import (
 )
 from app.module.admin.services.admin_service import AdminService
 from app.core.dependencies import get_current_admin_user
+from app.core.exceptions import ValidationError, NotFoundError
 from datetime import datetime
 from typing import Optional
 
@@ -67,19 +68,10 @@ async def list_users(
     - **role**: Optional filter by role
     - **search**: Optional search by name or email
     """
-    # TODO: Implement user listing with filters
+    users = await admin_service.list_users(db, role=role, search=search)
     return UserListResponse(
         success=True,
-        data=[
-            {
-                "id": 1,
-                "email": "user@example.com",
-                "name": "John Doe",
-                "role": "data-scientist",
-                "is_active": True,
-                "created_at": datetime.utcnow()
-            }
-        ],
+        data=users,
         timestamp=datetime.utcnow().isoformat()
     )
 
@@ -96,25 +88,12 @@ async def create_user(
     - **email**: User email address
     - **name**: User full name
     - **role**: User role ('data-scientist', 'admin', 'ml-engineer', 'analyst')
+    - **password**: Optional password (will generate random if not provided)
     """
-    # TODO: Implement user creation
-    # user = await admin_service.create_user(user_data, db)
-    # return UserResponse(
-    #     success=True,
-    #     data=user,
-    #     timestamp=datetime.utcnow().isoformat()
-    # )
-    
+    user = await admin_service.create_user(user_data, db)
     return UserResponse(
         success=True,
-        data={
-            "id": 1,
-            "email": user_data.email,
-            "name": user_data.name,
-            "role": user_data.role,
-            "is_active": True,
-            "created_at": datetime.utcnow()
-        },
+        data=user,
         timestamp=datetime.utcnow().isoformat()
     )
 
@@ -130,19 +109,12 @@ async def update_user(
     Update user
     
     - **user_id**: User identifier
-    - **user_data**: Fields to update
+    - **user_data**: Fields to update (name, email, role, is_active, password)
     """
-    # TODO: Implement user update
+    user = await admin_service.update_user(user_id, user_data, db)
     return UserResponse(
         success=True,
-        data={
-            "id": user_id,
-            "email": user_data.email or "user@example.com",
-            "name": user_data.name or "Updated User",
-            "role": user_data.role or "data-scientist",
-            "is_active": user_data.is_active if user_data.is_active is not None else True,
-            "created_at": datetime.utcnow()
-        },
+        data=user,
         timestamp=datetime.utcnow().isoformat()
     )
 
@@ -158,7 +130,7 @@ async def deactivate_user(
     
     - **user_id**: User identifier
     """
-    # TODO: Implement user deactivation
+    await admin_service.deactivate_user(user_id, db)
     return {
         "success": True,
         "message": f"User {user_id} deactivated",
