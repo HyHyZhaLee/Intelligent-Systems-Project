@@ -57,14 +57,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setIsLoading(true);
       const response = await authApi.login(email, password);
-      if (response.success) {
+      if (response.success && response.data?.token) {
         setUser(response.data.user);
         toast.success('Login successful');
       } else {
-        throw new Error(response.message || 'Login failed');
+        const errorMsg = response.message || 'Login failed. Please check your credentials.';
+        toast.error(errorMsg);
+        throw new Error(errorMsg);
       }
     } catch (error: any) {
-      const errorMessage = error.message || 'Login failed. Please check your credentials.';
+      // Extract error message - could be from API response or thrown error
+      // Backend returns: { success: false, error: { message: "...", code: "..." } }
+      const errorMessage = error?.message || error?.error?.message || 'Login failed. Please check your credentials.';
       toast.error(errorMessage);
       throw error;
     } finally {

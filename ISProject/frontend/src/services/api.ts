@@ -41,7 +41,9 @@ async function apiRequest<T>(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(errorData.detail || errorData.message || `HTTP error! status: ${response.status}`);
+    // Handle backend error response format: { success: false, error: { message, code, ... } }
+    const errorMessage = errorData?.error?.message || errorData.detail || errorData.message || `HTTP error! status: ${response.status}`;
+    throw new Error(errorMessage);
   }
 
   return response.json();
@@ -69,7 +71,9 @@ async function apiUpload<T>(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(errorData.detail || errorData.message || `HTTP error! status: ${response.status}`);
+    // Handle backend error response format: { success: false, error: { message, code, ... } }
+    const errorMessage = errorData?.error?.message || errorData.detail || errorData.message || `HTTP error! status: ${response.status}`;
+    throw new Error(errorMessage);
   }
 
   return response.json();
