@@ -74,13 +74,13 @@ function AppContent() {
         <Route
           path="/dashboard"
           element={
-            <ProtectedRoute allowedRoles={['data-scientist']} children={<DashboardWrapper />} />
+            <ProtectedRoute children={<DashboardWrapper />} />
           }
         />
         <Route
           path="/portal"
           element={
-            <ProtectedRoute allowedRoles={['enterprise']} children={<PortalWrapper />} />
+            <ProtectedRoute children={<PortalWrapper />} />
           }
         />
         <Route path="*" element={<Navigate to="/" replace />} />

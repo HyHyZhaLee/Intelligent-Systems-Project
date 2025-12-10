@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -16,21 +16,17 @@ export default function WelcomeScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const { login, isAuthenticated, user: authUser } = useAuth();
   const navigate = useNavigate();
+  const isInitialMount = useRef(true);
+  const justLoggedInRef = useRef(false);
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated (e.g., page refresh) - default to dashboard
+  // Only redirect on initial mount if user is already authenticated
   useEffect(() => {
-    if (isAuthenticated && authUser) {
-      const role: UserRole = 
-        authUser.role === 'data-scientist' || authUser.role === 'ml-engineer' 
-          ? 'data-scientist' 
-          : authUser.role === 'admin' 
-          ? 'enterprise' 
-          : 'guest';
-      
-      if (role === 'data-scientist') {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      if (isAuthenticated && authUser && !justLoggedInRef.current) {
+        // User is already authenticated when visiting the page (e.g., page refresh)
         navigate('/dashboard', { replace: true });
-      } else if (role === 'enterprise') {
-        navigate('/portal', { replace: true });
       }
     }
   }, [isAuthenticated, authUser, navigate]);
@@ -47,10 +43,19 @@ export default function WelcomeScreen() {
     // For other roles, require login
     if (email && password) {
       setIsLoading(true);
+      // Mark that we're about to log in to prevent useEffect from interfering
+      justLoggedInRef.current = true;
       try {
         await login(email, password);
-        // Navigation will be handled by the useEffect above when auth state updates
+        // Navigate based on selected widget after successful login
+        if (selectedRole === 'enterprise') {
+          navigate('/portal', { replace: true });
+        } else if (selectedRole === 'data-scientist') {
+          navigate('/dashboard', { replace: true });
+        }
       } catch (error) {
+        // Reset flag on error so user can try again
+        justLoggedInRef.current = false;
         // Error already handled in AuthContext with toast
       } finally {
         setIsLoading(false);
