@@ -42,35 +42,56 @@ export default function EndUserUpload() {
     }
   };
 
-  // Check training status on component mount and periodically
+  // Check training status immediately on component mount and periodically
   useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    
     const checkStatus = async () => {
       try {
+        setCheckingStatus(true);
         const status = await predictApi.getTrainingStatus();
         setTrainingStatus(status);
+        setCheckingStatus(false);
         
         // If training is in progress, poll every 2 seconds
         if (status.status === 'in_progress') {
-          const interval = setInterval(async () => {
+          interval = setInterval(async () => {
             try {
               const updatedStatus = await predictApi.getTrainingStatus();
               setTrainingStatus(updatedStatus);
               if (updatedStatus.status !== 'in_progress') {
-                clearInterval(interval);
+                if (interval) {
+                  clearInterval(interval);
+                  interval = null;
+                }
               }
             } catch (err) {
               console.error('Error checking training status:', err);
+              setCheckingStatus(false);
             }
           }, 2000);
-          
-          return () => clearInterval(interval);
         }
       } catch (error) {
         console.error('Error checking training status:', error);
+        setCheckingStatus(false);
+        // Set a default status if check fails
+        setTrainingStatus({
+          status: 'unknown',
+          message: 'Unable to check training status. Please try again.',
+          ready: false
+        });
       }
     };
     
+    // Check status immediately on mount
     checkStatus();
+    
+    // Cleanup interval on unmount
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
   }, []);
 
   const processImage = async (file: File, retry: boolean = false) => {
