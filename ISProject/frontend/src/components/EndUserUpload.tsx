@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
@@ -7,11 +8,8 @@ import { Alert, AlertDescription } from './ui/alert';
 import { predictApi } from '../services/api';
 import { toast } from 'sonner';
 
-interface EndUserUploadProps {
-  onBack: () => void;
-}
-
-export default function EndUserUpload({ onBack }: EndUserUploadProps) {
+export default function EndUserUpload() {
+  const navigate = useNavigate();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -256,7 +254,7 @@ export default function EndUserUpload({ onBack }: EndUserUploadProps) {
       <div className="max-w-3xl mx-auto">
         <Button
           variant="ghost"
-          onClick={onBack}
+          onClick={() => navigate('/')}
           className="mb-4"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />

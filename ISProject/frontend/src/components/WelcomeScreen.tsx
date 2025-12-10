@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,24 +9,38 @@ import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import type { UserRole } from '../App';
 
-interface WelcomeScreenProps {
-  onRoleSelect: (role: UserRole) => void;
-  onLogin: (email: string, password: string, role: UserRole) => void;
-}
-
-export default function WelcomeScreen({ onRoleSelect, onLogin }: WelcomeScreenProps) {
+export default function WelcomeScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [selectedRole, setSelectedRole] = useState<UserRole>('guest');
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, isAuthenticated, user: authUser } = useAuth();
+  const navigate = useNavigate();
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && authUser) {
+      const role: UserRole = 
+        authUser.role === 'data-scientist' || authUser.role === 'ml-engineer' 
+          ? 'data-scientist' 
+          : authUser.role === 'admin' 
+          ? 'enterprise' 
+          : 'guest';
+      
+      if (role === 'data-scientist') {
+        navigate('/dashboard', { replace: true });
+      } else if (role === 'enterprise') {
+        navigate('/portal', { replace: true });
+      }
+    }
+  }, [isAuthenticated, authUser, navigate]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     
     // If guest role is selected, go directly without credentials
     if (selectedRole === 'guest') {
-      onRoleSelect('guest');
+      navigate('/upload');
       return;
     }
     
@@ -33,11 +48,8 @@ export default function WelcomeScreen({ onRoleSelect, onLogin }: WelcomeScreenPr
     if (email && password) {
       setIsLoading(true);
       try {
-        const response = await login(email, password);
-        // The login function in AuthContext will handle navigation
-        // We just need to call onLogin to trigger navigation
-        // The actual user role comes from the backend response
-        onLogin(email, password, selectedRole);
+        await login(email, password);
+        // Navigation will be handled by the useEffect above when auth state updates
       } catch (error) {
         // Error already handled in AuthContext with toast
       } finally {

@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import WelcomeScreen from './components/WelcomeScreen';
 import EndUserUpload from './components/EndUserUpload';
 import DataScientistDashboard from './components/DataScientistDashboard';
 import EnterprisePortal from './components/EnterprisePortal';
+import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from './components/ui/sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
@@ -14,100 +16,75 @@ export interface User {
   name: string;
 }
 
-function AppContent() {
-  const [currentScreen, setCurrentScreen] = useState<'welcome' | 'upload' | 'dashboard' | 'portal'>('welcome');
-  const [user, setUser] = useState<User | null>(null);
-  const { isAuthenticated, user: authUser, logout: authLogout, isLoading } = useAuth();
-
-  // Check if user is authenticated and redirect accordingly
-  useEffect(() => {
-    if (!isLoading && authUser) {
-      // Map backend role to frontend role
-      const role: UserRole = 
-        authUser.role === 'data-scientist' || authUser.role === 'ml-engineer' 
-          ? 'data-scientist' 
-          : authUser.role === 'admin' 
-          ? 'enterprise' 
-          : 'guest';
-      
-      setUser({
-        email: authUser.email,
-        role,
-        name: authUser.name,
-      });
-
-      // Redirect based on role
-      if (role === 'data-scientist') {
-        setCurrentScreen('dashboard');
-      } else if (role === 'enterprise') {
-        setCurrentScreen('portal');
-      }
-    } else if (!isLoading && !isAuthenticated && currentScreen !== 'welcome' && currentScreen !== 'upload') {
-      // If not authenticated and not on welcome/upload, redirect to welcome
-      setCurrentScreen('welcome');
-      setUser(null);
-    }
-  }, [isAuthenticated, authUser, isLoading, currentScreen]);
-
-  const handleRoleSelect = (role: UserRole) => {
-    if (role === 'guest') {
-      setUser({ email: 'guest', role: 'guest', name: 'Guest User' });
-      setCurrentScreen('upload');
-    }
-  };
-
-  const handleLogin = async (email: string, password: string, role: UserRole) => {
-    // Login is handled by WelcomeScreen via AuthContext
-    // This function is called after successful login
-    if (role === 'data-scientist') {
-      setCurrentScreen('dashboard');
-    } else if (role === 'enterprise') {
-      setCurrentScreen('portal');
-    }
-  };
-
-  const handleLogout = async () => {
-    await authLogout();
-    setUser(null);
-    setCurrentScreen('welcome');
-  };
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-slate-600">Loading...</p>
-        </div>
-      </div>
-    );
+// Helper component to get user from auth context
+function DashboardWrapper() {
+  const { user: authUser } = useAuth();
+  
+  if (!authUser) {
+    return <Navigate to="/" replace />;
   }
 
+  // Map backend role to frontend role
+  const role: UserRole = 
+    authUser.role === 'data-scientist' || authUser.role === 'ml-engineer' 
+      ? 'data-scientist' 
+      : authUser.role === 'admin' 
+      ? 'enterprise' 
+      : 'guest';
+  
+  const user: User = {
+    email: authUser.email,
+    role,
+    name: authUser.name,
+  };
+
+  return <DataScientistDashboard user={user} />;
+}
+
+function PortalWrapper() {
+  const { user: authUser } = useAuth();
+  
+  if (!authUser) {
+    return <Navigate to="/" replace />;
+  }
+
+  // Map backend role to frontend role
+  const role: UserRole = 
+    authUser.role === 'data-scientist' || authUser.role === 'ml-engineer' 
+      ? 'data-scientist' 
+      : authUser.role === 'admin' 
+      ? 'enterprise' 
+      : 'guest';
+  
+  const user: User = {
+    email: authUser.email,
+    role,
+    name: authUser.name,
+  };
+
+  return <EnterprisePortal user={user} />;
+}
+
+function AppContent() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      {currentScreen === 'welcome' && (
-        <WelcomeScreen
-          onRoleSelect={handleRoleSelect}
-          onLogin={handleLogin}
+      <Routes>
+        <Route path="/" element={<WelcomeScreen />} />
+        <Route path="/upload" element={<EndUserUpload />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute allowedRoles={['data-scientist']} children={<DashboardWrapper />} />
+          }
         />
-      )}
-      {currentScreen === 'upload' && (
-        <EndUserUpload
-          onBack={handleLogout}
+        <Route
+          path="/portal"
+          element={
+            <ProtectedRoute allowedRoles={['enterprise']} children={<PortalWrapper />} />
+          }
         />
-      )}
-      {currentScreen === 'dashboard' && user && (
-        <DataScientistDashboard
-          user={user}
-          onLogout={handleLogout}
-        />
-      )}
-      {currentScreen === 'portal' && user && (
-        <EnterprisePortal
-          user={user}
-          onLogout={handleLogout}
-        />
-      )}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
       <Toaster />
     </div>
   );
@@ -116,7 +93,9 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
     </AuthProvider>
   );
 }

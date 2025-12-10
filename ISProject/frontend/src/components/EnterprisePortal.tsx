@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -11,15 +12,22 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { LogOut, Download, Plus, Settings, Activity, Users, Key, FileText, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminApi } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import type { User } from '../App';
 import type { SystemStatsData, AdminUser, APIConfigData, AuditLog } from '../types/api';
 
 interface EnterprisePortalProps {
   user: User;
-  onLogout: () => void;
 }
 
-export default function EnterprisePortal({ user, onLogout }: EnterprisePortalProps) {
+export default function EnterprisePortal({ user }: EnterprisePortalProps) {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/', { replace: true });
+  };
   const [stats, setStats] = useState<SystemStatsData | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [apiConfig, setApiConfig] = useState<APIConfigData | null>(null);
@@ -160,7 +168,7 @@ export default function EnterprisePortal({ user, onLogout }: EnterprisePortalPro
             <h1 className="text-3xl">Enterprise Dashboard</h1>
             <p className="text-slate-600">Organization Admin Portal</p>
           </div>
-          <Button variant="outline" onClick={onLogout}>
+          <Button variant="outline" onClick={handleLogout}>
             <LogOut className="w-4 h-4 mr-2" />
             Logout
           </Button>

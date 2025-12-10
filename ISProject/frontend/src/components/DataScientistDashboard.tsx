@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
@@ -12,16 +13,23 @@ import { LogOut, Download, Settings, BarChart3, Activity, TrendingUp } from 'luc
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { User } from '../App';
 import { modelsApi } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import type { ModelInfo, MetricsData, ConfusionMatrixData, ROCCurveData } from '../types/api';
 import React from 'react';
 
 interface DataScientistDashboardProps {
   user: User;
-  onLogout: () => void;
 }
 
-export default function DataScientistDashboard({ user, onLogout }: DataScientistDashboardProps) {
+export default function DataScientistDashboard({ user }: DataScientistDashboardProps) {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/', { replace: true });
+  };
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
   const [modelDetails, setModelDetails] = useState<any>(null);
@@ -197,7 +205,7 @@ export default function DataScientistDashboard({ user, onLogout }: DataScientist
             <h1 className="text-3xl">ML Model Dashboard</h1>
             <p className="text-slate-600">Welcome, {user.name}</p>
           </div>
-          <Button variant="outline" onClick={onLogout}>
+          <Button variant="outline" onClick={handleLogout}>
             <LogOut className="w-4 h-4 mr-2" />
             Logout
           </Button>
