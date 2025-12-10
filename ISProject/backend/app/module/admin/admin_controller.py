@@ -2,7 +2,7 @@
 Admin Controller
 Handles all admin endpoints
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -14,6 +14,8 @@ from app.module.admin.schemas import (
 from app.module.admin.services.admin_service import AdminService
 from app.core.dependencies import get_current_admin_user
 from app.core.exceptions import ValidationError, NotFoundError
+from app.core.audit_logger import AuditLogger
+from app.core.request_context import get_client_ip, get_user_agent
 from datetime import datetime
 from typing import Optional
 
@@ -35,22 +37,10 @@ async def get_system_stats(
     - Error count
     - Active users count
     """
-    # TODO: Implement system statistics
-    # stats = await admin_service.get_system_stats(db)
-    # return SystemStatsResponse(
-    #     success=True,
-    #     data=stats,
-    #     timestamp=datetime.utcnow().isoformat()
-    # )
-    
+    stats = await admin_service.get_system_stats(db)
     return SystemStatsResponse(
         success=True,
-        data={
-            "images_processed_today": 1250,
-            "success_rate": 98.5,
-            "error_count": 19,
-            "active_users": 45
-        },
+        data=stats,
         timestamp=datetime.utcnow().isoformat()
     )
 
@@ -79,6 +69,7 @@ async def list_users(
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     user_data: UserCreate,
+    request: Request,
     current_user: dict = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
@@ -91,6 +82,19 @@ async def create_user(
     - **password**: Optional password (will generate random if not provided)
     """
     user = await admin_service.create_user(user_data, db)
+    
+    # Log audit event
+    ip_address = get_client_ip(request)
+    user_agent = get_user_agent(request)
+    AuditLogger.log_user_action(
+        db=db,
+        action="user.created",
+        user_id=current_user.get("id"),
+        details={"target_user_id": user["id"], "target_user_email": user["email"], "target_user_role": user["role"]},
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    
     return UserResponse(
         success=True,
         data=user,
@@ -102,6 +106,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
+    request: Request,
     current_user: dict = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
@@ -112,6 +117,31 @@ async def update_user(
     - **user_data**: Fields to update (name, email, role, is_active, password)
     """
     user = await admin_service.update_user(user_id, user_data, db)
+    
+    # Log audit event
+    ip_address = get_client_ip(request)
+    user_agent = get_user_agent(request)
+    details = {"target_user_id": user_id}
+    if user_data.name is not None:
+        details["name_changed"] = True
+    if user_data.email is not None:
+        details["email_changed"] = True
+    if user_data.role is not None:
+        details["role_changed"] = True
+    if user_data.is_active is not None:
+        details["is_active_changed"] = True
+    if user_data.password is not None:
+        details["password_changed"] = True
+    
+    AuditLogger.log_user_action(
+        db=db,
+        action="user.updated",
+        user_id=current_user.get("id"),
+        details=details,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    
     return UserResponse(
         success=True,
         data=user,
@@ -122,6 +152,7 @@ async def update_user(
 @router.delete("/users/{user_id}", status_code=status.HTTP_200_OK)
 async def deactivate_user(
     user_id: int,
+    request: Request,
     current_user: dict = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
@@ -131,6 +162,19 @@ async def deactivate_user(
     - **user_id**: User identifier
     """
     await admin_service.deactivate_user(user_id, db)
+    
+    # Log audit event
+    ip_address = get_client_ip(request)
+    user_agent = get_user_agent(request)
+    AuditLogger.log_user_action(
+        db=db,
+        action="user.deactivated",
+        user_id=current_user.get("id"),
+        details={"target_user_id": user_id},
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    
     return {
         "success": True,
         "message": f"User {user_id} deactivated",
@@ -190,16 +234,20 @@ async def get_audit_logs(
     - **page**: Page number (default: 1)
     - **page_size**: Items per page (default: 50, max: 100)
     """
-    # TODO: Implement audit log retrieval with filters and pagination
+    result = await admin_service.get_audit_logs(
+        db=db,
+        start_date=start_date,
+        end_date=end_date,
+        user_id=user_id,
+        event_type=event_type,
+        search=search,
+        page=page,
+        page_size=page_size
+    )
+    
     return AuditLogsResponse(
         success=True,
-        data={
-            "logs": [],
-            "total": 0,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": 0
-        },
+        data=result,
         timestamp=datetime.utcnow().isoformat()
     )
 
@@ -219,19 +267,18 @@ async def export_audit_logs(
     Same filters as GET /audit-logs
     Returns CSV file download
     """
-    # TODO: Implement CSV export
-    # csv_data = await admin_service.export_audit_logs_csv(
-    #     start_date, end_date, user_id, event_type, db
-    # )
-    # return StreamingResponse(
-    #     iter([csv_data]),
-    #     media_type="text/csv",
-    #     headers={"Content-Disposition": f"attachment; filename=audit_logs_{datetime.utcnow().date()}.csv"}
-    # )
+    csv_data = await admin_service.export_audit_logs_csv(
+        db=db,
+        start_date=start_date,
+        end_date=end_date,
+        user_id=user_id,
+        event_type=event_type
+    )
     
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="CSV export - implementation pending"
+    return StreamingResponse(
+        iter([csv_data]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=audit_logs_{datetime.utcnow().date()}.csv"}
     )
 
 

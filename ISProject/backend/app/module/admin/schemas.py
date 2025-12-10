@@ -99,11 +99,13 @@ class AuditLogFilter(BaseModel):
 class AuditLogEntry(BaseModel):
     id: int
     user_id: Optional[int]
+    user_email: Optional[str] = None
     event_type: str
     action: str
     details: Optional[str]
     ip_address: Optional[str]
     created_at: datetime
+    timestamp: Optional[str] = None  # Alias for created_at for frontend compatibility
 
 
 class AuditLogsResponse(BaseModel):

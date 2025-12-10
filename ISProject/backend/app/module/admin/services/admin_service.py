@@ -3,15 +3,20 @@ Admin Service
 Business logic for admin operations
 """
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func, and_
+from sqlalchemy import desc
 from app.module.admin.schemas import UserCreate, UserUpdate
 from app.shared.models.user import User
+from app.shared.models.audit_log import AuditLog
 from app.core.security import get_password_hash
 from app.core.exceptions import ValidationError, NotFoundError
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import secrets
 import string
+import csv
+import io
+import json
 
 
 class AdminService:
@@ -21,13 +26,96 @@ class AdminService:
         """
         Get system statistics
         
-        TODO: Implement
-        - Count images processed today
-        - Calculate success rate
-        - Count errors
-        - Count active users
+        - Count images processed today (from audit logs with event_type='api' and action='predict')
+        - Calculate success rate (successful predictions / total predictions)
+        - Count errors (failed predictions or system errors)
+        - Count all active users in the system
         """
-        pass
+        # Get today's date range (use UTC timezone-aware datetime)
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = now
+        
+        # Get all prediction logs for today
+        prediction_logs = db.query(AuditLog).filter(
+            and_(
+                AuditLog.event_type == "api",
+                AuditLog.action == "predict",
+                AuditLog.created_at >= today_start,
+                AuditLog.created_at <= today_end
+            )
+        ).all()
+        
+        # Count total predictions and successful predictions
+        predictions_today = len(prediction_logs)
+        successful_predictions = 0
+        
+        for log in prediction_logs:
+            if log.details:
+                try:
+                    details_dict = json.loads(log.details)
+                    # If details has 'digit' key and no 'error' key, it's successful
+                    if "digit" in details_dict and "error" not in details_dict:
+                        successful_predictions += 1
+                except (json.JSONDecodeError, TypeError):
+                    # If details is not valid JSON, check if it contains "error"
+                    details_str = str(log.details).lower()
+                    if "error" not in details_str:
+                        successful_predictions += 1
+            else:
+                # No details means it might be an old log format, count as successful
+                successful_predictions += 1
+        
+        # Calculate success rate
+        success_rate = 0.0
+        if predictions_today > 0:
+            success_rate = (successful_predictions / predictions_today) * 100
+        
+        # Count errors (system events with error or failed predictions)
+        # Get all logs that might contain errors
+        potential_error_logs = db.query(AuditLog).filter(
+            and_(
+                AuditLog.created_at >= today_start,
+                AuditLog.created_at <= today_end,
+                or_(
+                    # System events with "error" in action
+                    and_(AuditLog.event_type == "system", AuditLog.action.like("%error%")),
+                    # API predictions with error in details
+                    and_(
+                        AuditLog.event_type == "api",
+                        AuditLog.action == "predict",
+                        AuditLog.details.isnot(None),
+                        AuditLog.details.like("%error%")
+                    )
+                )
+            )
+        ).all()
+        
+        # Count actual errors by checking JSON details
+        error_count = 0
+        for log in potential_error_logs:
+            if log.details:
+                try:
+                    details_dict = json.loads(log.details)
+                    if "error" in details_dict:
+                        error_count += 1
+                except (json.JSONDecodeError, TypeError):
+                    # If details is not JSON but contains "error", count it
+                    if "error" in str(log.details).lower():
+                        error_count += 1
+            elif log.event_type == "system" and "error" in log.action.lower():
+                # System events with error in action name
+                error_count += 1
+        
+        # Count all users in the system
+        active_users = db.query(User).filter(User.is_active == True).count()
+        
+        return {
+            "images_processed_today": predictions_today,
+            "success_rate": round(success_rate, 1),
+            "error_count": error_count,
+            "active_users": active_users
+        }
     
     async def list_users(
         self,
@@ -224,13 +312,73 @@ class AdminService:
         """
         Get audit logs with filters and pagination
         
-        TODO: Implement
         - Query audit_logs table
-        - Apply filters
+        - Apply filters (date range, user_id, event_type, search)
+        - Join with User table to get user email
         - Paginate results
         - Return logs and metadata
         """
-        pass
+        # Start with base query, joining User table
+        query = db.query(AuditLog, User.email).outerjoin(User, AuditLog.user_id == User.id)
+        
+        # Apply date filters
+        if start_date:
+            query = query.filter(AuditLog.created_at >= start_date)
+        if end_date:
+            query = query.filter(AuditLog.created_at <= end_date)
+        
+        # Apply user_id filter
+        if user_id:
+            query = query.filter(AuditLog.user_id == user_id)
+        
+        # Apply event_type filter
+        if event_type:
+            query = query.filter(AuditLog.event_type == event_type)
+        
+        # Apply search filter (search in action or details)
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                or_(
+                    AuditLog.action.ilike(search_pattern),
+                    AuditLog.details.ilike(search_pattern)
+                )
+            )
+        
+        # Get total count before pagination
+        total = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        query = query.order_by(desc(AuditLog.created_at)).offset(offset).limit(page_size)
+        
+        # Execute query and format results
+        results = query.all()
+        
+        logs = []
+        for audit_log, user_email in results:
+            logs.append({
+                "id": audit_log.id,
+                "user_id": audit_log.user_id,
+                "user_email": user_email,
+                "event_type": audit_log.event_type,
+                "action": audit_log.action,
+                "details": audit_log.details,
+                "ip_address": audit_log.ip_address,
+                "created_at": audit_log.created_at.isoformat() if audit_log.created_at else None,
+                "timestamp": audit_log.created_at.isoformat() if audit_log.created_at else None
+            })
+        
+        # Calculate total pages
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+        
+        return {
+            "logs": logs,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages
+        }
     
     async def export_audit_logs_csv(
         self,
@@ -243,12 +391,57 @@ class AdminService:
         """
         Export audit logs to CSV
         
-        TODO: Implement
-        - Query audit logs
-        - Generate CSV content
+        - Query audit logs with same filters as get_audit_logs
+        - Generate CSV content with headers
         - Return CSV string
         """
-        pass
+        # Use same query logic as get_audit_logs but without pagination
+        query = db.query(AuditLog, User.email).outerjoin(User, AuditLog.user_id == User.id)
+        
+        # Apply filters
+        if start_date:
+            query = query.filter(AuditLog.created_at >= start_date)
+        if end_date:
+            query = query.filter(AuditLog.created_at <= end_date)
+        if user_id:
+            query = query.filter(AuditLog.user_id == user_id)
+        if event_type:
+            query = query.filter(AuditLog.event_type == event_type)
+        
+        # Order by created_at descending
+        query = query.order_by(desc(AuditLog.created_at))
+        
+        # Execute query
+        results = query.all()
+        
+        # Generate CSV content
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            "timestamp",
+            "user_email",
+            "event_type",
+            "action",
+            "details",
+            "ip_address",
+            "user_agent"
+        ])
+        
+        # Write rows
+        for audit_log, user_email in results:
+            writer.writerow([
+                audit_log.created_at.isoformat() if audit_log.created_at else "",
+                user_email or "",
+                audit_log.event_type or "",
+                audit_log.action or "",
+                audit_log.details or "",
+                audit_log.ip_address or "",
+                audit_log.user_agent or ""
+            ])
+        
+        return output.getvalue()
     
     async def list_batch_jobs(
         self,

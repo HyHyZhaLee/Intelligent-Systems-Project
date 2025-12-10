@@ -2,7 +2,7 @@
 Prediction Controller
 Handles image prediction endpoints
 """
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.module.predict.schemas import (
@@ -10,6 +10,8 @@ from app.module.predict.schemas import (
 )
 from app.module.predict.services.predict_service import PredictService
 from app.core.dependencies import get_optional_auth
+from app.core.audit_logger import AuditLogger
+from app.core.request_context import get_client_ip, get_user_agent
 from app.shared.ml.svm_service import SVMService
 from datetime import datetime
 from typing import Optional, List
@@ -96,6 +98,7 @@ async def trigger_training(
 
 @router.post("/predict", response_model=PredictionResponse, status_code=status.HTTP_200_OK)
 async def predict_digit(
+    request: Request,
     file: UploadFile = File(...),
     save_debug: bool = False,
     current_user: Optional[dict] = Depends(get_optional_auth),
@@ -161,12 +164,48 @@ async def predict_digit(
         f"content_type: {file.content_type}"
     )
     
-    result = await predict_service.predict_image(file, current_user, db, save_debug=save_debug)
-    return PredictionResponse(
-        success=True,
-        data=result,
-        timestamp=datetime.utcnow().isoformat()
-    )
+    # Extract request context for audit logging
+    ip_address = get_client_ip(request)
+    user_agent = get_user_agent(request)
+    user_id = current_user.get("id") if current_user else None
+    
+    try:
+        result = await predict_service.predict_image(file, current_user, db, save_debug=save_debug)
+        
+        # Log successful prediction
+        AuditLogger.log_api_call(
+            db=db,
+            action="predict",
+            user_id=user_id,
+            details={
+                "digit": result.get("digit"),
+                "confidence": result.get("confidence"),
+                "processing_time_ms": result.get("processing_time_ms"),
+                "filename": file.filename
+            },
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        
+        return PredictionResponse(
+            success=True,
+            data=result,
+            timestamp=datetime.utcnow().isoformat()
+        )
+    except Exception as e:
+        # Log failed prediction
+        AuditLogger.log_api_call(
+            db=db,
+            action="predict",
+            user_id=user_id,
+            details={
+                "error": str(e),
+                "filename": file.filename if file else None
+            },
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        raise
 
 
 @router.post("/batch", response_model=BatchJobResponse, status_code=status.HTTP_202_ACCEPTED)
