@@ -44,7 +44,7 @@ export default function EndUserUpload() {
 
   // Check training status immediately on component mount and periodically
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
     
     const checkStatus = async () => {
       try {
