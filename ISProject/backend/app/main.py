@@ -48,22 +48,41 @@ app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize services on app startup"""
+    """
+    Initialize services on app startup
+    
+    This includes loading or training the ML model:
+    - If a pre-trained model exists on disk, it will be loaded (fast startup)
+    - If no model exists, training will start in the background (5-8 minutes)
+    - The API will be available immediately, but predictions will return 503 until training completes
+    """
     from app.shared.ml.svm_service import SVMService
     
+    logger.info("="*80)
+    logger.info("🚀 Starting Handwritten Digit OCR API")
+    logger.info("="*80)
+    
     # Initialize SVM service - this will load model if exists
+    logger.info("📦 Initializing ML model...")
     svm_service = SVMService()
     
     # Check if model needs training
     training_status = SVMService.get_training_status()
     if training_status == "not_started":
         # Start background training
-        logger.info("Starting background training of SVM model (model not found on disk)...")
+        logger.info("🔧 No pre-trained model found. Starting background training...")
+        logger.info("⏱️  Training will take approximately 6-8 minutes")
+        logger.info("📊 Using 30,000 MNIST samples for training")
+        logger.info("🌐 API is available now, but predictions will return 503 until training completes")
+        logger.info("💡 Use GET /api/predict/status to check training progress")
         SVMService.start_background_training()
     elif training_status == "completed":
-        logger.info("SVM model is ready")
+        logger.info("✅ Pre-trained model loaded successfully - Ready for predictions!")
+        logger.info("📍 Model location: ISProject/backend/models/svm_model.pkl")
     else:
-        logger.info(f"SVM model status: {training_status}")
+        logger.info(f"⚠️  SVM model status: {training_status}")
+    
+    logger.info("="*80)
 
 
 @app.get("/health", tags=["Health Check"])

@@ -9,12 +9,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def process_uploaded_image(file: UploadFile) -> tuple:
+async def process_uploaded_image(file: UploadFile, save_debug: bool = False) -> tuple:
     """
     Process uploaded image file
     
     Args:
         file: Uploaded file from FastAPI
+        save_debug: If True, save preprocessing debug images
     
     Returns:
         tuple: (preprocessed_image_array, original_filename)
@@ -48,8 +49,9 @@ async def process_uploaded_image(file: UploadFile) -> tuple:
     # Log first few bytes to verify file content
     logger.debug(f"File first 20 bytes (hex): {contents[:20].hex()}")
     
-    # Preprocess image
-    preprocessed = preprocess_image(contents)
+    # Preprocess image with optional debug
+    debug_filename = file.filename.replace('.', '_') if save_debug else None
+    preprocessed = preprocess_image(contents, save_debug=save_debug, debug_filename=debug_filename)
     
     logger.info(
         f"Successfully processed image: {file.filename}, "

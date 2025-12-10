@@ -5,6 +5,7 @@ Enhanced preprocessing for real-world images
 """
 import numpy as np
 from PIL import Image, ImageFilter
+from scipy import ndimage
 import io
 from typing import Union
 import logging
@@ -12,7 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def preprocess_image(image_file: Union[bytes, io.BytesIO, Image.Image]) -> np.ndarray:
+def preprocess_image(image_file: Union[bytes, io.BytesIO, Image.Image], save_debug: bool = False, debug_filename: str = None) -> np.ndarray:
     """
     Preprocess image for ML model input
     
@@ -25,6 +26,8 @@ def preprocess_image(image_file: Union[bytes, io.BytesIO, Image.Image]) -> np.nd
     
     Args:
         image_file: Image file (bytes, BytesIO, or PIL Image)
+        save_debug: If True, save intermediate preprocessing steps for debugging
+        debug_filename: Optional filename for debug output
     
     Returns:
         numpy array of shape (1, 784) with normalized pixel values
@@ -47,166 +50,146 @@ def preprocess_image(image_file: Union[bytes, io.BytesIO, Image.Image]) -> np.nd
         # Log original image properties
         logger.debug(f"Original image - size: {img.size}, mode: {img.mode}, format: {img.format}")
         
+        # Step 0.5: Denoise for low-quality images
+        # Apply median filter to remove noise while preserving edges
+        img = img.filter(ImageFilter.MedianFilter(size=3))
+        logger.debug("Applied median filter for denoising")
+        
         # Convert to grayscale
         if img.mode != 'L':
             img = img.convert('L')
             logger.debug("Converted image to grayscale")
         
-        # Get original size for logging
-        original_size = img.size
-        logger.debug(f"Original image size: {original_size}")
+        # OPTIMIZED PREPROCESSING - balance between simplicity and quality
+        # Key insight: MNIST digits are well-centered and have good stroke thickness
+        # User images may have thin strokes or be off-center
         
-        # Step 1: Resize to intermediate size (56x56) to preserve detail while making processing faster
-        # This is 2x the final size, which helps with centering and detail preservation
-        intermediate_size = 56
-        img = img.resize((intermediate_size, intermediate_size), Image.Resampling.LANCZOS)
-        logger.debug(f"Resized to intermediate size: {intermediate_size}x{intermediate_size}")
+        # Save original for debugging
+        if save_debug and debug_filename:
+            import os
+            debug_dir = "./debug_preprocessing"
+            os.makedirs(debug_dir, exist_ok=True)
+            img.save(f"{debug_dir}/{debug_filename}_01_original.png")
+            logger.info(f"Saved original image to {debug_dir}/{debug_filename}_01_original.png")
         
-        # Convert to numpy array for processing
+        # Convert to numpy array
         img_array = np.array(img, dtype=np.float32)
         
-        # Step 2: Enhance contrast to make digit more visible
-        # Use percentile-based contrast stretching
-        p2, p98 = np.percentile(img_array, (2, 98))
-        if p98 > p2:
-            img_array = np.clip((img_array - p2) / (p98 - p2) * 255.0, 0, 255)
-            logger.debug(f"Contrast enhanced - percentiles: p2={p2:.1f}, p98={p98:.1f}")
-        
-        # Step 3: Determine if we need to invert (MNIST expects dark digits on light background)
-        # Handle both cases:
-        # - Black digit on white background (no inversion needed)
-        # - White digit on black background (needs inversion)
-        mean_before_invert = img_array.mean()
-        median_value = np.median(img_array)
-        dark_pixels = np.sum(img_array < 128)
-        light_pixels = np.sum(img_array >= 128)
-        dark_ratio = 0.0
-        light_ratio = 0.0
-        total_pixels = dark_pixels + light_pixels
-        if total_pixels > 0:
-            dark_ratio = dark_pixels / total_pixels
-            light_ratio = light_pixels / total_pixels
-        
-        # Heuristic:
-        # - If image is overall bright but has enough dark pixels, keep as-is
-        # - If image is overall dark (more dark than light) OR median is low, invert
-        should_invert = False
-        if light_pixels == 0 or dark_pixels == 0:
-            # Degenerate case, rely on mean
-            should_invert = mean_before_invert > 127.5
-        else:
-            # If dark dominates heavily, invert to make background light
-            if dark_ratio > 0.6:
-                should_invert = True
-            # If image is bright overall but median is high (white digit on black), invert
-            elif mean_before_invert > 150 and median_value > 140:
-                should_invert = True
+        # Step 1: Invert if needed (BLACK digit on WHITE bg → WHITE digit on BLACK bg)
+        mean_value = img_array.mean()
+        should_invert = mean_value > 127.5
         
         if should_invert:
-            logger.info(
-                f"Inverting image (mean={mean_before_invert:.1f}, dark_ratio={dark_ratio:.2f}) "
-                f"to match MNIST dark-on-light format"
-            )
+            logger.info(f"Inverting image (mean={mean_value:.1f}) - BLACK on WHITE → WHITE on BLACK")
             img_array = 255.0 - img_array
+        else:
+            logger.debug(f"No inversion needed (mean={mean_value:.1f})")
         
-        # Step 4: Center the digit in the image
-        # Find bounding box of non-background pixels (darker pixels)
-        threshold_for_centering = np.percentile(img_array, 30)  # Use 30th percentile as threshold
-        non_bg_pixels = img_array < threshold_for_centering
+        # Save inverted image
+        if save_debug and debug_filename:
+            img_inv = Image.fromarray(img_array.astype(np.uint8), mode='L')
+            img_inv.save(f"{debug_dir}/{debug_filename}_02_inverted.png")
+            logger.info(f"Saved inverted image to {debug_dir}/{debug_filename}_02_inverted.png")
         
-        if np.any(non_bg_pixels):
-            # Find bounding box
-            rows = np.any(non_bg_pixels, axis=1)
-            cols = np.any(non_bg_pixels, axis=0)
+        # Step 1.2: Enhance contrast for low-quality images
+        # Use adaptive thresholding for better digit extraction
+        # More aggressive approach for very blurry images
+        if img_array.std() < 60:  # Low contrast image (increased threshold)
+            # Apply Otsu's thresholding for better binary separation
+            from PIL import ImageOps
+            img_pil_temp = Image.fromarray(img_array.astype(np.uint8), mode='L')
             
-            if np.any(rows) and np.any(cols):
-                row_indices = np.where(rows)[0]
-                col_indices = np.where(cols)[0]
-                
-                if len(row_indices) > 0 and len(col_indices) > 0:
-                    rmin, rmax = row_indices[0], row_indices[-1]
-                    cmin, cmax = col_indices[0], col_indices[-1]
-                    
-                    # Extract digit region with some padding
-                    padding = max(3, int(min(img_array.shape) * 0.05))
-                    rmin = max(0, rmin - padding)
-                    rmax = min(img_array.shape[0], rmax + padding)
-                    cmin = max(0, cmin - padding)
-                    cmax = min(img_array.shape[1], cmax + padding)
-                    
-                    # Extract digit region
-                    digit_region = img_array[rmin:rmax, cmin:cmax]
-                    
-                    # Create new centered image filled with background color
-                    h, w = img_array.shape
-                    bg_color = np.percentile(img_array, 90)  # Use 90th percentile as background
-                    new_img = np.ones((h, w), dtype=np.float32) * bg_color
-                    
-                    # Calculate position to center the digit
-                    new_h, new_w = digit_region.shape
-                    start_r = (h - new_h) // 2
-                    start_c = (w - new_w) // 2
-                    
-                    # Place digit in center
-                    end_r = min(start_r + new_h, h)
-                    end_c = min(start_c + new_w, w)
-                    src_h = end_r - start_r
-                    src_w = end_c - start_c
-                    new_img[start_r:end_r, start_c:end_c] = digit_region[:src_h, :src_w]
-                    
-                    img_array = new_img
-                    logger.debug(f"Centered digit - bounding box: ({rmin},{cmin}) to ({rmax},{cmax})")
+            # Increase contrast significantly
+            img_pil_temp = ImageOps.autocontrast(img_pil_temp, cutoff=2)
+            img_array = np.array(img_pil_temp, dtype=np.float32)
+            logger.info(f"Applied autocontrast - std was {img_array.std():.1f}")
+            
+            # Apply binary thresholding if still very low contrast
+            if img_array.std() < 50:
+                threshold_val = np.percentile(img_array[img_array > 0], 50)
+                img_array = np.where(img_array > threshold_val, img_array, 0)
+                # Normalize remaining pixels to full range
+                if img_array.max() > 0:
+                    img_array = (img_array / img_array.max()) * 255.0
+                    logger.info(f"Applied binary thresholding at {threshold_val:.1f}")
         
-        # Step 5: Apply gentle contrast enhancement (less aggressive)
-        # Use mean and std for adaptive enhancement
-        threshold = np.mean(img_array)
-        std_dev = np.std(img_array)
+        # Step 1.3: Sharpen edges to recover from blur
+        # Apply unsharp mask to enhance edges
+        img_pil_temp = Image.fromarray(img_array.astype(np.uint8), mode='L')
+        img_pil_temp = img_pil_temp.filter(ImageFilter.SHARPEN)
+        img_array = np.array(img_pil_temp, dtype=np.float32)
+        logger.debug("Applied sharpening filter")
         
-        # Gentle contrast enhancement: only if there's good variation
-        if std_dev > 15:  # Only if there's sufficient variation
-            # Less aggressive enhancement to preserve digit features
-            binary_mask = img_array < (threshold - std_dev * 0.2)
-            img_array = np.where(binary_mask, 
-                                np.clip(img_array * 0.75, 0, 255),  # Slightly darken digit areas
-                                np.clip(img_array * 1.05, 0, 255))  # Slightly lighten background
-            logger.debug(f"Applied gentle contrast enhancement - threshold: {threshold:.1f}, std: {std_dev:.1f}")
+        if save_debug and debug_filename:
+            img_sharp = Image.fromarray(img_array.astype(np.uint8), mode='L')
+            img_sharp.save(f"{debug_dir}/{debug_filename}_02b_sharpened.png")
+            logger.info(f"Saved sharpened image to {debug_dir}/{debug_filename}_02b_sharpened.png")
         
-        # Step 6: Apply slight smoothing to reduce noise
+        # Step 1.5: DISABLED dilation - causes number 9 to look like number 8
+        # Dilation thickens strokes which helps thin digits but merges separate 
+        # components (like the circle and tail of 9) making them look like 8
+        # For now, relying on 2-stage resize (56x56 → 28x28) to preserve structure
+        logger.debug("Skipping dilation to preserve digit structure (especially 9 vs 8)")
+        
+        # Step 2: Resize with better quality
+        # First resize to intermediate size to preserve more details
+        # Then resize to 28x28 - this 2-step approach preserves thin strokes better
         img_pil = Image.fromarray(img_array.astype(np.uint8), mode='L')
-        img_pil = img_pil.filter(ImageFilter.SMOOTH_MORE)
-        img_array = np.array(img_pil, dtype=np.float32)
         
-        # Step 7: Resize to final 28x28 (MNIST standard)
-        img_pil = Image.fromarray(img_array.astype(np.uint8), mode='L')
+        # Get dimensions
+        w, h = img_pil.size
+        max_dim = max(w, h)
+        
+        # First pass: resize to 56x56 (2x final size) if image is large
+        if max_dim > 56:
+            # Maintain aspect ratio during first resize
+            scale = 56 / max_dim
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            # Create 56x56 canvas and center the resized image
+            canvas = Image.new('L', (56, 56), color=0)
+            paste_x = (56 - new_w) // 2
+            paste_y = (56 - new_h) // 2
+            canvas.paste(img_pil, (paste_x, paste_y))
+            img_pil = canvas
+            
+            if save_debug and debug_filename:
+                img_pil.save(f"{debug_dir}/{debug_filename}_03_resized_56x56.png")
+        
+        # Final resize: 56x56 → 28x28 (or direct to 28x28 if already small)
         img_pil = img_pil.resize((28, 28), Image.Resampling.LANCZOS)
         img_array = np.array(img_pil, dtype=np.float32)
+        
+        # Save resized image
+        if save_debug and debug_filename:
+            # Enlarge for visibility
+            img_resized_large = img_pil.resize((280, 280), Image.Resampling.NEAREST)
+            img_resized_large.save(f"{debug_dir}/{debug_filename}_03_resized_28x28.png")
+            logger.info(f"Saved resized image to {debug_dir}/{debug_filename}_03_resized_28x28.png")
+        
+        # Save resized image
+        if save_debug and debug_filename:
+            # Enlarge for visibility
+            img_resized_large = img_pil.resize((280, 280), Image.Resampling.NEAREST)
+            img_resized_large.save(f"{debug_dir}/{debug_filename}_03_resized_28x28.png")
+            logger.info(f"Saved resized image to {debug_dir}/{debug_filename}_03_resized_28x28.png")
         
         # Validate array was created successfully
         if img_array.size == 0:
             raise ValueError("Image array is empty after conversion")
         
-        # Step 8: Normalize to [0, 1] range
-        if img_array.max() > 0:
-            img_array = img_array / 255.0
-        else:
-            logger.warning("Image array has max value of 0 after processing")
+        # Step 3: Normalize to [0, 1] range
+        img_array = img_array / 255.0
         
-        # Step 9: Final normalization (less aggressive matching)
-        # MNIST training data typically has mean around 0.13-0.15
-        # Don't force too much - preserve the natural distribution
-        current_mean = img_array.mean()
-        if current_mean > 0.4:  # Only adjust if significantly too bright
-            # Gentle scaling to match training distribution
-            target_mean = 0.15  # Target mean for MNIST-like distribution
-            scale_factor = target_mean / current_mean if current_mean > 0 else 1.0
-            img_array = img_array * scale_factor
-            img_array = np.clip(img_array, 0, 1)
-            logger.debug(f"Adjusted mean from {current_mean:.3f} to {img_array.mean():.3f}")
-        elif current_mean < 0.05:  # If too dark, brighten slightly
-            scale_factor = 0.1 / current_mean if current_mean > 0 else 1.0
-            img_array = img_array * scale_factor
-            img_array = np.clip(img_array, 0, 1)
-            logger.debug(f"Brightened image - mean from {current_mean:.3f} to {img_array.mean():.3f}")
+        # Save normalized image
+        if save_debug and debug_filename:
+            # Convert back to 0-255 for visualization
+            img_norm_vis = Image.fromarray((img_array * 255).astype(np.uint8), mode='L')
+            img_norm_vis_large = img_norm_vis.resize((280, 280), Image.Resampling.NEAREST)
+            img_norm_vis_large.save(f"{debug_dir}/{debug_filename}_04_normalized.png")
+            logger.info(f"Saved normalized image to {debug_dir}/{debug_filename}_04_normalized.png")
         
         # Reshape to (1, 784) for model input
         img_array = img_array.reshape(1, 784)

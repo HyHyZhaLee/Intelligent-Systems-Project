@@ -28,12 +28,15 @@ async def get_training_status():
     
     Returns:
         dict with training status and message
+    
+    Note: Model training starts automatically on app startup if no pre-trained model exists.
+    Check this endpoint to see if the model is ready before making predictions.
     """
     training_status = SVMService.get_training_status()
     
     status_messages = {
         "not_started": "Model training has not started yet",
-        "in_progress": "Model is currently training. Please wait...",
+        "in_progress": "Model is currently training. Please wait... (typically takes 12-15 minutes)",
         "completed": "Model is ready for predictions",
         "failed": "Model training failed. Please check logs or retry."
     }
@@ -41,27 +44,90 @@ async def get_training_status():
     return {
         "status": training_status,
         "message": status_messages.get(training_status, "Unknown status"),
-        "ready": training_status == "completed"
+        "ready": training_status == "completed",
+        "info": "Model trains automatically on startup. Use POST /api/predict/train to retrain manually."
+    }
+
+
+@router.post("/predict/train", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_training(
+    current_user: Optional[dict] = Depends(get_optional_auth),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually trigger model training
+    
+    This endpoint allows you to manually start model training.
+    Training happens in the background and typically takes 5-8 minutes.
+    
+    Use GET /api/predict/status to check training progress.
+    
+    Note: Training also happens automatically on app startup if no pre-trained model exists.
+    
+    Authentication: Optional (but recommended for admin users)
+    
+    Returns:
+        dict with training status
+    """
+    training_status = SVMService.get_training_status()
+    
+    if training_status == "in_progress":
+        logger.info("Training already in progress, rejecting new training request")
+        return {
+            "success": False,
+            "message": "Model training is already in progress. Please wait for it to complete.",
+            "status": training_status
+        }
+    
+    if training_status == "completed":
+        logger.info("Retraining model (previous model will be replaced)")
+    
+    # Start background training
+    logger.info(f"Manual training triggered by user: {current_user.get('email') if current_user else 'guest'}")
+    SVMService.start_background_training()
+    
+    return {
+        "success": True,
+        "message": "Model training started in background with data augmentation. Use GET /api/predict/status to check progress.",
+        "status": "in_progress",
+        "estimated_time": "20-25 minutes"
     }
 
 
 @router.post("/predict", response_model=PredictionResponse, status_code=status.HTTP_200_OK)
 async def predict_digit(
     file: UploadFile = File(...),
+    save_debug: bool = False,
     current_user: Optional[dict] = Depends(get_optional_auth),
     db: Session = Depends(get_db)
 ):
     """
-    Single image prediction endpoint
+    Predict digit from uploaded image (0-9)
+    
+    **This endpoint only performs predictions using the pre-trained model.**
+    Model training happens automatically on app startup (see startup logs).
     
     - **file**: Image file (PNG, JPG, JPEG, max 5MB)
+    - **save_debug**: If True, save preprocessing debug images to debug_preprocessing/ folder (default: False)
     
     Returns predicted digit (0-9) and confidence score
     
-    Authentication: Optional (guest access allowed)
-    Rate limit: 100 requests/minute (guest), 10,000/minute (authenticated)
+    **Model Training:**
+    - Model is trained automatically when the app starts (if not already trained)
+    - Training takes 20-25 minutes in the background (90k augmented samples)
+    - Use GET /api/predict/status to check if model is ready
+    - Use POST /api/predict/train to manually retrain the model
     
-    Returns 503 Service Unavailable if model is still training
+    **Authentication:** Optional (guest access allowed)
+    
+    **Rate limits:**
+    - Guest: 100 requests/minute
+    - Authenticated: 10,000 requests/minute
+    
+    **Error Codes:**
+    - 503: Model is still training or training failed
+    - 400: Invalid image format or size
+    - 422: Validation error
     """
     # Check training status first
     training_status = SVMService.get_training_status()
@@ -95,7 +161,7 @@ async def predict_digit(
         f"content_type: {file.content_type}"
     )
     
-    result = await predict_service.predict_image(file, current_user, db)
+    result = await predict_service.predict_image(file, current_user, db, save_debug=save_debug)
     return PredictionResponse(
         success=True,
         data=result,

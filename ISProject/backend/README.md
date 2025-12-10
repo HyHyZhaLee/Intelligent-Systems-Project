@@ -98,6 +98,53 @@ The API will be available at:
 - Docs: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
+## 🤖 Model Training Architecture
+
+**Important:** The ML model training is separated from prediction endpoints.
+
+### Automatic Training on Startup
+When you start the backend server:
+1. The app checks if a pre-trained model exists (`models/svm_model.pkl`)
+2. **If model exists**: Loads it instantly → API ready for predictions
+3. **If model doesn't exist**: Starts training in background (5-8 minutes)
+   - API starts immediately
+   - Predictions return HTTP 503 until training completes
+   - Check training status at `GET /api/predict/status`
+
+### Training Process
+- **Dataset**: MNIST (20,000 handwritten digit samples)
+- **Algorithm**: SVM with RBF kernel (optimized hyperparameters)
+- **Duration**: ~5-8 minutes (one-time process)
+- **Output**: Saved to `models/svm_model.pkl` and `models/svm_scaler.pkl`
+- **Accuracy**: ~95-96%
+
+### Training Endpoints
+```bash
+# Check if model is ready for predictions
+GET /api/predict/status
+
+# Manually trigger training/retraining
+POST /api/predict/train
+```
+
+### Training Logs
+Watch the startup logs to see training progress:
+```
+🚀 Starting Handwritten Digit OCR API
+📦 Initializing ML model...
+🔧 No pre-trained model found. Starting background training...
+⏱️  Training will take approximately 5-8 minutes
+📊 Using 20,000 MNIST samples for training
+🌐 API is available now, but predictions will return 503 until training completes
+💡 Use GET /api/predict/status to check training progress
+```
+
+### Manual Training via Script
+You can also train the model manually before starting the server:
+```bash
+python scripts/train_model.py
+```
+
 ## API Endpoints
 
 ### Authentication (`/api/auth`)
@@ -107,7 +154,9 @@ The API will be available at:
 - `GET /api/auth/me` - Get current user info
 
 ### Prediction (`/api`)
-- `POST /api/predict` - Single image prediction
+- `GET /api/predict/status` - **Check if model is ready for predictions**
+- `POST /api/predict/train` - **Manually trigger model training/retraining**
+- `POST /api/predict` - Single image prediction (requires trained model)
 - `POST /api/batch` - Batch image processing
 - `GET /api/batch/{job_id}` - Get batch job status
 

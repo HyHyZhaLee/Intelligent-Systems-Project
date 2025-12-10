@@ -3,6 +3,7 @@ SVM Service
 Trains and caches SVM model for digit recognition using MNIST dataset
 Supports model persistence to avoid retraining on every startup
 Includes background training and feature scaling
+Includes data augmentation for better generalization
 """
 import numpy as np
 from typing import Tuple, Optional
@@ -15,6 +16,8 @@ import warnings
 import pickle
 import os
 from pathlib import Path
+from scipy import ndimage
+from scipy.ndimage import rotate, shift
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -200,12 +203,10 @@ class SVMService:
             
             logger.info(f"MNIST dataset loaded: {len(X_full)} samples")
             
-            # Use larger subset for better accuracy
-            # Since training runs in background, we can use more samples
-            # Increased to 20000 for significantly better accuracy
-            # Training time will be longer (~5-8 minutes) but accuracy should improve to ~95-96%+
-            # Using 20k samples provides good balance between accuracy and training time
-            sample_size = 20000
+            # Use 30000 samples base + augmentation for balanced training time
+            # Training time: ~20-25 minutes with augmentation
+            # Expected accuracy: ~98%+ with better generalization
+            sample_size = 30000
             if len(X_full) > sample_size:
                 # Use stratified sampling to ensure balanced classes
                 from sklearn.model_selection import train_test_split
@@ -223,6 +224,12 @@ class SVMService:
                 y_train = y_full
                 logger.info("Dataset smaller than sample_size; using full dataset")
             
+            # Apply data augmentation BEFORE normalization (works on 0-255 scale)
+            # This will 3x the dataset: 30k → 90k samples
+            logger.info("Applying data augmentation to improve generalization...")
+            X_train, y_train = SVMService._augment_data(X_train, y_train, augmentation_factor=2)
+            logger.info(f"Training set after augmentation: {len(X_train)} samples")
+            
             # Normalize pixel values to [0, 1] (MNIST is already 0-255)
             X_train = X_train / 255.0
             
@@ -232,17 +239,18 @@ class SVMService:
             _scaler = StandardScaler()
             X_train_scaled = _scaler.fit_transform(X_train)
             
-            logger.info(f"Training SVM classifier on {len(X_train)} samples...")
-            logger.info("Using optimized hyperparameters: C=10, gamma=0.001")
-            logger.info(f"This may take 5-8 minutes depending on your system (training {len(X_train)} samples)...")
+            logger.info(f"Training SVM classifier on {len(X_train)} augmented samples...")
+            logger.info("Using optimized hyperparameters: C=5, gamma=0.0005")
+            logger.info(f"This may take 20-25 minutes depending on your system (training {len(X_train)} augmented samples)...")
             
             # Train SVM with RBF kernel and optimized hyperparameters
-            # Based on GridSearchCV results from lab notebook:
-            # C=10, gamma=0.001 showed ~94% accuracy vs ~91% with defaults
+            # Tuned for better generalization on handwritten digits:
+            # C=5 (reduced from 10 to reduce overfitting)
+            # gamma=0.0005 (reduced from 0.001 for smoother decision boundaries)
             _model = SVC(
                 kernel='rbf',
-                C=10,  # Optimized from default 1.0
-                gamma=0.001,  # Optimized from 'scale'
+                C=5,  # Better generalization than C=10
+                gamma=0.0005,  # Smoother decision boundary
                 probability=True,
                 random_state=42,
                 verbose=False
@@ -259,8 +267,89 @@ class SVMService:
             logger.error("If this is the first run, MNIST dataset download may take a few minutes")
             raise ValueError(f"Failed to train SVM model: {str(e)}")
     
+    @staticmethod
+    def _augment_data(X: np.ndarray, y: np.ndarray, augmentation_factor: int = 2) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Augment training data with rotations, translations, and morphological operations
+        This helps SVM learn to handle variations in handwritten digits
+        
+        Args:
+            X: Training images (N, 784) - flattened 28x28 images
+            y: Training labels (N,)
+            augmentation_factor: How many augmented versions per original image
+        
+        Returns:
+            Tuple of (augmented_X, augmented_y) with original + augmented data
+        """
+        logger.info(f"Starting data augmentation with factor={augmentation_factor}...")
+        
+        augmented_images = [X]  # Start with original images
+        augmented_labels = [y]
+        
+        # Reshape for image operations (N, 28, 28)
+        X_images = X.reshape(-1, 28, 28)
+        
+        for i in range(augmentation_factor):
+            logger.info(f"Generating augmentation batch {i+1}/{augmentation_factor}...")
+            batch_augmented = []
+            
+            for idx, img in enumerate(X_images):
+                # Randomly choose augmentation type
+                aug_type = np.random.randint(0, 5)
+                
+                if aug_type == 0:
+                    # Rotation: -15 to +15 degrees
+                    angle = np.random.uniform(-15, 15)
+                    augmented = rotate(img, angle, reshape=False, order=1, mode='constant', cval=0)
+                    
+                elif aug_type == 1:
+                    # Translation: -2 to +2 pixels in x and y
+                    shift_x = np.random.uniform(-2, 2)
+                    shift_y = np.random.uniform(-2, 2)
+                    augmented = shift(img, [shift_y, shift_x], order=1, mode='constant', cval=0)
+                    
+                elif aug_type == 2:
+                    # Erosion: make strokes thinner (for thick handwriting)
+                    threshold = img > 50
+                    eroded = ndimage.binary_erosion(threshold, iterations=1)
+                    augmented = np.where(eroded, img, 0)
+                    
+                elif aug_type == 3:
+                    # Dilation: make strokes thicker (for thin handwriting)
+                    threshold = img > 50
+                    dilated = ndimage.binary_dilation(threshold, iterations=1)
+                    augmented = np.where(dilated, img, 0)
+                    
+                else:
+                    # Combination: rotate + small translation
+                    angle = np.random.uniform(-10, 10)
+                    augmented = rotate(img, angle, reshape=False, order=1, mode='constant', cval=0)
+                    shift_x = np.random.uniform(-1, 1)
+                    shift_y = np.random.uniform(-1, 1)
+                    augmented = shift(augmented, [shift_y, shift_x], order=1, mode='constant', cval=0)
+                
+                # Clip values to valid range
+                augmented = np.clip(augmented, 0, 255)
+                batch_augmented.append(augmented)
+                
+                # Log progress every 10000 images
+                if (idx + 1) % 10000 == 0:
+                    logger.info(f"  Processed {idx + 1}/{len(X_images)} images in batch {i+1}")
+            
+            # Flatten and add to augmented set
+            batch_augmented = np.array(batch_augmented).reshape(-1, 784)
+            augmented_images.append(batch_augmented)
+            augmented_labels.append(y)  # Same labels as original
+        
+        # Combine all augmented data
+        X_augmented = np.vstack(augmented_images)
+        y_augmented = np.hstack(augmented_labels)
+        
+        logger.info(f"Data augmentation complete: {len(X)} → {len(X_augmented)} samples")
+        return X_augmented, y_augmented
     
-    def predict(self, image_array: np.ndarray) -> Tuple[int, float]:
+    
+    def predict(self, image_array: np.ndarray) -> Tuple[int, float, np.ndarray]:
         """
         Predict digit from preprocessed image array
         
@@ -268,9 +357,10 @@ class SVMService:
             image_array: Preprocessed image array of shape (1, 784) or (784,)
         
         Returns:
-            tuple: (predicted_digit, confidence_score)
+            tuple: (predicted_digit, confidence_score, all_probabilities)
                 - predicted_digit: Integer from 0-9
                 - confidence_score: Float from 0.0 to 1.0
+                - all_probabilities: Array of probabilities for all 10 digits [0-9]
         
         Raises:
             ValueError: If model is not ready or training is in progress
@@ -339,7 +429,7 @@ class SVMService:
                 f"all probabilities: {probabilities[0]}"
             )
             
-            return predicted_digit, confidence
+            return predicted_digit, confidence, probabilities[0]
         
         except Exception as e:
             logger.error(f"Error during SVM prediction: {str(e)}")

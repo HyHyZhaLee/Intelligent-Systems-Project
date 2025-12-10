@@ -21,7 +21,8 @@ class PredictService:
         image_file: UploadFile,
         current_user: Optional[dict],
         db: Session,
-        model_type: str = "svm"
+        model_type: str = "svm",
+        save_debug: bool = False
     ) -> dict:
         """
         Predict digit from uploaded image
@@ -31,6 +32,7 @@ class PredictService:
             current_user: Current user (optional for guest access)
             db: Database session
             model_type: Type of model to use
+            save_debug: If True, save preprocessing debug images
         
         Returns:
             dict: Prediction result with digit, confidence, and processing time
@@ -45,7 +47,7 @@ class PredictService:
             )
             
             # Process uploaded image
-            preprocessed_image, filename = await process_uploaded_image(image_file)
+            preprocessed_image, filename = await process_uploaded_image(image_file, save_debug=save_debug)
             
             logger.info(
                 f"Image preprocessed successfully - shape: {preprocessed_image.shape}, "
@@ -54,7 +56,7 @@ class PredictService:
             
             # Run prediction
             logger.debug(f"Calling predict_digit with model_type: {model_type}")
-            predicted_digit, confidence = predict_digit(preprocessed_image, model_type)
+            predicted_digit, confidence, alternatives = predict_digit(preprocessed_image, model_type)
             
             # Calculate processing time
             processing_time = int((time.time() - start_time) * 1000)
@@ -81,7 +83,11 @@ class PredictService:
             result = {
                 "digit": predicted_digit,
                 "confidence": round(confidence * 100, 2),  # Convert to percentage
-                "processing_time_ms": processing_time
+                "processing_time_ms": processing_time,
+                "alternatives": [
+                    {"digit": alt["digit"], "confidence": round(alt["confidence"] * 100, 2)}
+                    for alt in alternatives
+                ]
             }
             
             logger.debug(f"Returning prediction result: {result}")
