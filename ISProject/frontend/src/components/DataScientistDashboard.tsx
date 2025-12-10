@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
-import { LogOut, Download, Settings, BarChart3, Activity, TrendingUp } from 'lucide-react';
+import { LogOut, Download, Settings, BarChart3, Activity, TrendingUp, Play } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { User } from '../App';
 import { modelsApi } from '../services/api';
@@ -43,18 +43,39 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
   const [tuneId, setTuneId] = useState<string | null>(null);
   const [cParam, setCParam] = useState('1.0');
   const [gamma, setGamma] = useState('0.001');
+  const [compareModel1Id, setCompareModel1Id] = useState<number | null>(null);
+  const [compareModel2Id, setCompareModel2Id] = useState<number | null>(null);
+  const [compareModel1Data, setCompareModel1Data] = useState<any>(null);
+  const [compareModel2Data, setCompareModel2Data] = useState<any>(null);
+  const [comparing, setComparing] = useState(false);
+  const [trainModelDialogOpen, setTrainModelDialogOpen] = useState(false);
+  const [training, setTraining] = useState(false);
+  const [trainingId, setTrainingId] = useState<string | null>(null);
+  const [trainModelType, setTrainModelType] = useState('svm');
+  const [trainCParam, setTrainCParam] = useState('1.0');
+  const [trainGamma, setTrainGamma] = useState('scale');
+  const [trainKernel, setTrainKernel] = useState('rbf');
+  const [rocCurveData, setRocCurveData] = useState<ROCCurveData | null>(null);
 
   // Fetch models list on mount
   useEffect(() => {
     const fetchModels = async () => {
       try {
         const response = await modelsApi.listModels();
-        if (response.success && response.data.length > 0) {
-          setModels(response.data);
-          setSelectedModelId(response.data[0].id);
+        if (response.success) {
+          if (response.data.length > 0) {
+            setModels(response.data);
+            setSelectedModelId(response.data[0].id);
+          } else {
+            toast.info('No models available. You can train a new model.');
+          }
+        } else {
+          toast.error('Failed to load models: Invalid response from server');
         }
       } catch (error: any) {
-        toast.error(`Failed to load models: ${error.message}`);
+        const errorMessage = error?.message || 'Unknown error occurred';
+        toast.error(`Failed to load models: ${errorMessage}`);
+        console.error('Error fetching models:', error);
       } finally {
         setLoading(false);
       }
@@ -80,26 +101,29 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
         if (metricsRes.success) setMetrics(metricsRes.data);
         if (confusionRes.success) setConfusionMatrix(confusionRes.data.matrix);
         if (rocRes.success) {
+          // Store raw ROC curve data for dynamic rendering
+          const rawRocData = rocRes.data;
+          setRocCurveData(rawRocData);
+          
           // Transform ROC data for chart
-          const rocCurveData = rocRes.data;
           const chartData: any[] = [];
           const maxLength = Math.max(
-            rocCurveData.micro_avg.fpr.length,
-            rocCurveData.macro_avg.fpr.length,
-            ...rocCurveData.curves.map(c => c.fpr.length)
+            rawRocData.micro_avg.fpr.length,
+            rawRocData.macro_avg.fpr.length,
+            ...rawRocData.curves.map(c => c.fpr.length)
           );
 
           for (let i = 0; i < maxLength; i++) {
             const point: any = {
-              fpr: rocCurveData.micro_avg.fpr[i] || 0,
-              tpr: rocCurveData.micro_avg.tpr[i] || 0,
-              random: rocCurveData.micro_avg.fpr[i] || 0,
-              microAvg: rocCurveData.micro_avg.tpr[i] || 0,
-              macroAvg: rocCurveData.macro_avg.tpr[i] || 0,
+              fpr: rawRocData.micro_avg.fpr[i] || 0,
+              tpr: rawRocData.micro_avg.tpr[i] || 0,
+              random: rawRocData.micro_avg.fpr[i] || 0,
+              microAvg: rawRocData.micro_avg.tpr[i] || 0,
+              macroAvg: rawRocData.macro_avg.tpr[i] || 0,
             };
 
-            // Add individual digit curves
-            rocCurveData.curves.forEach((curve, idx) => {
+            // Add individual digit curves dynamically for all 10 digits
+            rawRocData.curves.forEach((curve) => {
               point[`digit${curve.class}`] = curve.tpr[i] || 0;
             });
 
@@ -108,7 +132,15 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
           setRocData(chartData);
         }
       } catch (error: any) {
-        toast.error(`Failed to load model data: ${error.message}`);
+        const errorMessage = error?.message || 'Unknown error occurred';
+        toast.error(`Failed to load model data: ${errorMessage}`);
+        console.error('Error fetching model data:', error);
+        // Set empty states on error
+        setModelDetails(null);
+        setMetrics(null);
+        setConfusionMatrix([]);
+        setRocData([]);
+        setRocCurveData(null);
       } finally {
         setLoading(false);
       }
@@ -127,6 +159,7 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
         if (response.success) {
           if (response.data.status === 'completed') {
             setOptimizing(false);
+            setTuneId(null);
             toast.success('Hyperparameter optimization completed!');
             // Refresh model data
             if (selectedModelId) {
@@ -137,15 +170,56 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
               if (detailsRes.success) setModelDetails(detailsRes.data);
               if (metricsRes.success) setMetrics(metricsRes.data);
             }
+          } else if (response.data.status === 'failed') {
+            setOptimizing(false);
+            setTuneId(null);
+            toast.error('Hyperparameter optimization failed');
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Failed to check tuning status:', error);
+        // Don't show toast for polling errors to avoid spam
+        // Only show if it's a critical error
+        if (error?.message && !error.message.includes('status')) {
+          toast.error('Failed to check optimization status');
+        }
       }
     }, 3000);
 
     return () => clearInterval(interval);
   }, [optimizing, tuneId, selectedModelId]);
+
+  // Poll for training status if training
+  useEffect(() => {
+    if (!training || !trainingId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        // Note: Backend doesn't have training status endpoint yet, so we'll simulate
+        // In a real implementation, you'd call: modelsApi.getTrainingStatus(trainingId)
+        // For now, we'll just check if models list has changed (new model added)
+        const response = await modelsApi.listModels();
+        if (response.success) {
+          const newModels = response.data;
+          if (newModels.length > models.length) {
+            setTraining(false);
+            setTrainingId(null);
+            setModels(newModels);
+            toast.success('Model training completed!');
+            setTrainModelDialogOpen(false);
+          }
+        }
+      } catch (error: any) {
+        console.error('Failed to check training status:', error);
+        // Don't show toast for polling errors to avoid spam
+        if (error?.message && !error.message.includes('status')) {
+          toast.error('Failed to check training status');
+        }
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [training, trainingId, models.length]);
 
   const handleModelChange = (modelId: string) => {
     setSelectedModelId(parseInt(modelId));
@@ -160,7 +234,13 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
       await modelsApi.exportModel(selectedModelId);
       toast.success('Model exported successfully');
     } catch (error: any) {
-      toast.error(`Failed to export model: ${error.message}`);
+      const errorMessage = error?.message || 'Unknown error occurred';
+      if (errorMessage.includes('501') || errorMessage.includes('Not Implemented')) {
+        toast.error('Model export is not yet implemented on the backend');
+      } else {
+        toast.error(`Failed to export model: ${errorMessage}`);
+      }
+      console.error('Error exporting model:', error);
     }
   };
 
@@ -171,6 +251,7 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
     }
     try {
       setOptimizing(true);
+      setOptimizationDialogOpen(false);
       const response = await modelsApi.startHyperparameterTuning(selectedModelId, {
         hyperparameters: {
           C: parseFloat(cParam),
@@ -183,8 +264,126 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
         toast.success('Hyperparameter optimization started');
       }
     } catch (error: any) {
-      toast.error(`Failed to start optimization: ${error.message}`);
+      const errorMessage = error?.message || 'Unknown error occurred';
+      toast.error(`Failed to start optimization: ${errorMessage}`);
+      console.error('Error starting optimization:', error);
       setOptimizing(false);
+      setTuneId(null);
+    }
+  };
+
+  const handleCompareModels = async () => {
+    if (!compareModel1Id || !compareModel2Id) {
+      toast.error('Please select both models to compare');
+      return;
+    }
+    if (compareModel1Id === compareModel2Id) {
+      toast.error('Please select two different models');
+      return;
+    }
+    try {
+      setComparing(true);
+      const [model1Details, model1Metrics, model2Details, model2Metrics] = await Promise.all([
+        modelsApi.getModelDetails(compareModel1Id),
+        modelsApi.getModelMetrics(compareModel1Id),
+        modelsApi.getModelDetails(compareModel2Id),
+        modelsApi.getModelMetrics(compareModel2Id),
+      ]);
+      
+      let hasError = false;
+      if (model1Details.success && model1Metrics.success) {
+        setCompareModel1Data({
+          ...model1Details.data,
+          metrics: model1Metrics.data,
+        });
+      } else {
+        hasError = true;
+        toast.error('Failed to load data for Model 1');
+      }
+      
+      if (model2Details.success && model2Metrics.success) {
+        setCompareModel2Data({
+          ...model2Details.data,
+          metrics: model2Metrics.data,
+        });
+      } else {
+        hasError = true;
+        toast.error('Failed to load data for Model 2');
+      }
+      
+      if (!hasError) {
+        toast.success('Models compared successfully');
+      }
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Unknown error occurred';
+      toast.error(`Failed to compare models: ${errorMessage}`);
+      console.error('Error comparing models:', error);
+      setCompareModel1Data(null);
+      setCompareModel2Data(null);
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  const handleDownloadSampleData = async () => {
+    try {
+      // Create a link to MNIST dataset or provide sample data
+      // For now, we'll provide a link to the official MNIST dataset
+      const link = document.createElement('a');
+      link.href = 'http://yann.lecun.com/exdb/mnist/';
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success('Opening MNIST dataset page in new tab');
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Unknown error occurred';
+      toast.error(`Failed to open dataset page: ${errorMessage}`);
+      console.error('Error downloading sample data:', error);
+    }
+  };
+
+  const handleTrainModel = async () => {
+    // Validate inputs
+    if (!trainModelType) {
+      toast.error('Please select a model type');
+      return;
+    }
+    if (!trainCParam || isNaN(parseFloat(trainCParam)) || parseFloat(trainCParam) <= 0) {
+      toast.error('Please enter a valid C parameter (must be > 0)');
+      return;
+    }
+    if (!trainKernel) {
+      toast.error('Please select a kernel type');
+      return;
+    }
+    
+    try {
+      setTraining(true);
+      setTrainModelDialogOpen(false);
+      const response = await modelsApi.trainModel({
+        model_type: trainModelType,
+        hyperparameters: {
+          C: parseFloat(trainCParam),
+          gamma: trainGamma,
+          kernel: trainKernel,
+        },
+      });
+      if (response.success) {
+        setTrainingId(response.data.training_id);
+        toast.success('Model training started. This may take 5-8 minutes.');
+      } else {
+        toast.error('Failed to start training: Invalid response from server');
+        setTraining(false);
+        setTrainingId(null);
+      }
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Unknown error occurred';
+      toast.error(`Failed to start training: ${errorMessage}`);
+      console.error('Error starting training:', error);
+      setTraining(false);
+      setTrainingId(null);
     }
   };
 
@@ -412,53 +611,45 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
                         legendType="line"
                       />
                       
-                      {/* Individual digit class curves */}
-                      <Line 
-                        dataKey="digit0" 
-                        stroke="#ef4444" 
-                        strokeWidth={2} 
-                        dot={false}
-                        name="Digit 0 (AUC = 0.998)"
-                      />
-                      <Line 
-                        dataKey="digit1" 
-                        stroke="#f97316" 
-                        strokeWidth={2} 
-                        dot={false}
-                        name="Digit 1 (AUC = 0.997)"
-                      />
-                      <Line 
-                        dataKey="digit5" 
-                        stroke="#06b6d4" 
-                        strokeWidth={2} 
-                        dot={false}
-                        name="Digit 5 (AUC = 0.993)"
-                      />
-                      <Line 
-                        dataKey="digit8" 
-                        stroke="#8b5cf6" 
-                        strokeWidth={2} 
-                        dot={false}
-                        name="Digit 8 (AUC = 0.994)"
-                      />
+                      {/* Individual digit class curves - dynamically render all 10 digits */}
+                      {rocCurveData?.curves.map((curve) => {
+                        const colors = [
+                          '#ef4444', '#f97316', '#fbbf24', '#84cc16', '#06b6d4',
+                          '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e'
+                        ];
+                        return (
+                          <Line 
+                            key={`digit${curve.class}`}
+                            dataKey={`digit${curve.class}`}
+                            stroke={colors[curve.class % colors.length]}
+                            strokeWidth={2}
+                            dot={false}
+                            name={`Digit ${curve.class} (AUC = ${curve.auc.toFixed(3)})`}
+                          />
+                        );
+                      })}
                       
                       {/* Micro and Macro average curves */}
-                      <Line 
-                        dataKey="microAvg" 
-                        stroke="#ec4899" 
-                        strokeWidth={3} 
-                        dot={false}
-                        name="Micro-average (AUC = 0.995)"
-                        strokeDasharray="3 3"
-                      />
-                      <Line 
-                        dataKey="macroAvg" 
-                        stroke="#0891b2" 
-                        strokeWidth={3} 
-                        dot={false}
-                        name="Macro-average (AUC = 0.995)"
-                        strokeDasharray="3 3"
-                      />
+                      {rocCurveData && (
+                        <>
+                          <Line 
+                            dataKey="microAvg" 
+                            stroke="#ec4899" 
+                            strokeWidth={3} 
+                            dot={false}
+                            name={`Micro-average (AUC = ${rocCurveData.micro_avg.auc.toFixed(3)})`}
+                            strokeDasharray="3 3"
+                          />
+                          <Line 
+                            dataKey="macroAvg" 
+                            stroke="#0891b2" 
+                            strokeWidth={3} 
+                            dot={false}
+                            name={`Macro-average (AUC = ${rocCurveData.macro_avg.auc.toFixed(3)})`}
+                            strokeDasharray="3 3"
+                          />
+                        </>
+                      )}
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -557,11 +748,25 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
               <Button 
                 variant="outline" 
                 className="w-full" 
-                onClick={() => setCompareModelsDialogOpen(true)}
-                disabled={models.length < 2}
+                onClick={() => {
+                  if (models.length < 2) {
+                    toast.info('At least 2 models are required for comparison. Currently only 1 SVM model is supported.');
+                  } else {
+                    setCompareModelsDialogOpen(true);
+                  }
+                }}
               >
                 <Activity className="w-4 h-4 mr-2" />
                 Compare Models
+              </Button>
+              <Button 
+                variant="outline" 
+                className="w-full"
+                onClick={() => setTrainModelDialogOpen(true)}
+                disabled={loading}
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Train New Model
               </Button>
             </CardContent>
           </Card>
@@ -575,7 +780,11 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
               <p><strong>Size:</strong> 70,000 images</p>
               <p><strong>Format:</strong> 28x28 grayscale</p>
               <p><strong>Split:</strong> 60k train / 10k test</p>
-              <Button variant="outline" className="w-full mt-4">
+              <Button 
+                variant="outline" 
+                className="w-full mt-4"
+                onClick={handleDownloadSampleData}
+              >
                 <Download className="w-4 h-4 mr-2" />
                 Download Sample Data
               </Button>
@@ -585,47 +794,121 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
 
         {/* Compare Models Dialog */}
         <Dialog open={compareModelsDialogOpen} onOpenChange={setCompareModelsDialogOpen}>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Compare Models</DialogTitle>
               <DialogDescription>
-                Select the models you want to compare.
+                {models.length < 2 
+                  ? 'At least 2 models are required for comparison. Currently only 1 SVM model is supported.'
+                  : 'Select two models to compare their performance metrics.'}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="model1">Model 1</Label>
-                <Select id="model1">
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="SVM">SVM</SelectItem>
-                    <SelectItem value="Random Forest">Random Forest</SelectItem>
-                    <SelectItem value="Neural Network">Neural Network</SelectItem>
-                  </SelectContent>
-                </Select>
+            {models.length < 2 ? (
+              <div className="py-4 text-center text-slate-500">
+                <p>Only {models.length} model available. Multiple models are required for comparison.</p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="model2">Model 2</Label>
-                <Select id="model2">
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="SVM">SVM</SelectItem>
-                    <SelectItem value="Random Forest">Random Forest</SelectItem>
-                    <SelectItem value="Neural Network">Neural Network</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" onClick={() => setCompareModelsDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit">Compare</Button>
-            </DialogFooter>
+            ) : (
+              <>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="model1">Model 1</Label>
+                    <Select 
+                      value={compareModel1Id?.toString() || ''} 
+                      onValueChange={(value) => setCompareModel1Id(parseInt(value))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select first model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {models.map((model) => (
+                          <SelectItem key={model.id} value={model.id.toString()}>
+                            {model.model_type.toUpperCase()} (ID: {model.id})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="model2">Model 2</Label>
+                    <Select 
+                      value={compareModel2Id?.toString() || ''} 
+                      onValueChange={(value) => setCompareModel2Id(parseInt(value))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select second model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {models.filter(m => m.id !== compareModel1Id).map((model) => (
+                          <SelectItem key={model.id} value={model.id.toString()}>
+                            {model.model_type.toUpperCase()} (ID: {model.id})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {compareModel1Data && compareModel2Data && (
+                    <div className="mt-6 space-y-4 border-t pt-4">
+                      <h3 className="font-semibold text-lg">Comparison Results</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <h4 className="font-medium text-sm text-slate-600">
+                            Model 1: {compareModel1Data.model_type.toUpperCase()}
+                          </h4>
+                          <div className="space-y-1 text-sm">
+                            <p>Accuracy: {(compareModel1Data.metrics.accuracy * 100).toFixed(2)}%</p>
+                            <p>Precision: {compareModel1Data.metrics.precision.toFixed(3)}</p>
+                            <p>Recall: {compareModel1Data.metrics.recall.toFixed(3)}</p>
+                            <p>F1-Score: {compareModel1Data.metrics.f1_score.toFixed(3)}</p>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <h4 className="font-medium text-sm text-slate-600">
+                            Model 2: {compareModel2Data.model_type.toUpperCase()}
+                          </h4>
+                          <div className="space-y-1 text-sm">
+                            <p>Accuracy: {(compareModel2Data.metrics.accuracy * 100).toFixed(2)}%</p>
+                            <p>Precision: {compareModel2Data.metrics.precision.toFixed(3)}</p>
+                            <p>Recall: {compareModel2Data.metrics.recall.toFixed(3)}</p>
+                            <p>F1-Score: {compareModel2Data.metrics.f1_score.toFixed(3)}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 p-3 bg-slate-50 rounded-lg">
+                        <p className="text-xs font-semibold text-slate-700 mb-2">Winner by Metric:</p>
+                        <div className="space-y-1 text-xs">
+                          <p>Accuracy: {compareModel1Data.metrics.accuracy > compareModel2Data.metrics.accuracy ? 'Model 1' : 'Model 2'}</p>
+                          <p>Precision: {compareModel1Data.metrics.precision > compareModel2Data.metrics.precision ? 'Model 1' : 'Model 2'}</p>
+                          <p>Recall: {compareModel1Data.metrics.recall > compareModel2Data.metrics.recall ? 'Model 1' : 'Model 2'}</p>
+                          <p>F1-Score: {compareModel1Data.metrics.f1_score > compareModel2Data.metrics.f1_score ? 'Model 1' : 'Model 2'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button 
+                    type="button" 
+                    onClick={() => {
+                      setCompareModelsDialogOpen(false);
+                      setCompareModel1Id(null);
+                      setCompareModel2Id(null);
+                      setCompareModel1Data(null);
+                      setCompareModel2Data(null);
+                    }}
+                  >
+                    Close
+                  </Button>
+                  <Button 
+                    type="button" 
+                    onClick={handleCompareModels}
+                    disabled={!compareModel1Id || !compareModel2Id || comparing || compareModel1Id === compareModel2Id}
+                  >
+                    {comparing ? 'Comparing...' : 'Compare'}
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
           </DialogContent>
         </Dialog>
 
@@ -659,13 +942,23 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
                   onChange={(e) => setGamma(e.target.value)}
                 />
               </div>
+              {optimizing && tuneId && (
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-900">
+                    Optimization in progress... This may take several minutes.
+                  </p>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button 
                 type="button" 
                 onClick={() => {
                   setOptimizationDialogOpen(false);
-                  setOptimizing(false);
+                  if (!optimizing) {
+                    setOptimizing(false);
+                    setTuneId(null);
+                  }
                 }}
                 disabled={optimizing}
               >
@@ -685,6 +978,122 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
                   <div className="flex items-center">
                     <Settings className="w-4 h-4 mr-2" />
                     Optimize
+                  </div>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Train Model Dialog */}
+        <Dialog open={trainModelDialogOpen} onOpenChange={setTrainModelDialogOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Train New Model</DialogTitle>
+              <DialogDescription>
+                Train a new SVM model with custom hyperparameters. Currently only SVM models are supported.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="trainModelType">Model Type</Label>
+                <Select value={trainModelType} onValueChange={setTrainModelType} disabled>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="svm">SVM (Support Vector Machine)</SelectItem>
+                    <SelectItem value="random_forest" disabled>Random Forest (Not Available)</SelectItem>
+                    <SelectItem value="neural_network" disabled>Neural Network (Not Available)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-slate-500">Only SVM models are currently supported</p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="trainKernel">Kernel</Label>
+                <Select value={trainKernel} onValueChange={setTrainKernel}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="rbf">RBF (Radial Basis Function)</SelectItem>
+                    <SelectItem value="linear">Linear</SelectItem>
+                    <SelectItem value="poly">Polynomial</SelectItem>
+                    <SelectItem value="sigmoid">Sigmoid</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="trainCParam">C Parameter</Label>
+                  <Input 
+                    id="trainCParam" 
+                    type="number" 
+                    step="0.1" 
+                    min="0.1"
+                    value={trainCParam}
+                    onChange={(e) => setTrainCParam(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="trainGamma">Gamma</Label>
+                  <Select value={trainGamma} onValueChange={setTrainGamma}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="scale">Scale</SelectItem>
+                      <SelectItem value="auto">Auto</SelectItem>
+                      <SelectItem value="0.001">0.001</SelectItem>
+                      <SelectItem value="0.01">0.01</SelectItem>
+                      <SelectItem value="0.1">0.1</SelectItem>
+                      <SelectItem value="1.0">1.0</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {training && trainingId && (
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-900">
+                    Training in progress... This may take 5-8 minutes.
+                  </p>
+                  <p className="text-xs text-blue-700 mt-1">
+                    Training ID: {trainingId}
+                  </p>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button 
+                type="button" 
+                onClick={() => {
+                  setTrainModelDialogOpen(false);
+                  if (!training) {
+                    setTraining(false);
+                    setTrainingId(null);
+                  }
+                }}
+                disabled={training}
+              >
+                Cancel
+              </Button>
+              <Button 
+                type="submit" 
+                onClick={handleTrainModel}
+                disabled={training || !trainModelType}
+              >
+                {training ? (
+                  <div className="flex items-center">
+                    <TrendingUp className="w-4 h-4 mr-2" />
+                    Training...
+                  </div>
+                ) : (
+                  <div className="flex items-center">
+                    <Play className="w-4 h-4 mr-2" />
+                    Start Training
                   </div>
                 )}
               </Button>
