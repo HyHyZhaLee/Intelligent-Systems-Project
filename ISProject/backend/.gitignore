@@ -41,10 +41,6 @@ logs/
 uploads/*
 !uploads/.gitkeep
 
-# Models
-models/*
-!models/.gitkeep
-
 # IDE
 .vscode/
 .idea/
