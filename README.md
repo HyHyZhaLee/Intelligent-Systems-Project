@@ -134,9 +134,6 @@ Comprehensive documentation is available in the `docs/` folder:
 
 - **[PRD.md](docs/PRD.md)** - Product Requirements Document with all features and requirements
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture and technical design
-- **[EPICS_AND_STORIES.md](docs/EPICS_AND_STORIES.md)** - User stories and implementation breakdown
-- **[SPRINT_PLAN.md](docs/SPRINT_PLAN.md)** - Sprint planning and development phases
-- **[IMPLEMENTATION_READINESS.md](docs/IMPLEMENTATION_READINESS.md)** - Readiness assessment
 
 ## 🔌 API Endpoints
 
