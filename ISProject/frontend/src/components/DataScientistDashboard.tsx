@@ -34,7 +34,7 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
   const [modelDetails, setModelDetails] = useState<any>(null);
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
-  const [confusionMatrix, setConfusionMatrix] = useState<number[][]>([]);
+  const [confusionMatrix, setConfusionMatrix] = useState<ConfusionMatrixData["matrix"]>([]);
   const [rocData, setRocData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [compareModelsDialogOpen, setCompareModelsDialogOpen] = useState(false);
@@ -685,7 +685,10 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
           <TabsContent value="hyperparams">
             <Card>
               <CardHeader>
-                <CardTitle>Hyperparameter Tuning</CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle>Hyperparameter Tuning</CardTitle>
+                  <Badge variant="secondary">Not Available</Badge>
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -718,8 +721,7 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
                 </div>
                 <Button 
                   className="w-full" 
-                  onClick={() => setOptimizationDialogOpen(true)}
-                  disabled={!selectedModelId}
+                  disabled
                 >
                   <Settings className="w-4 h-4 mr-2" />
                   Run Hyperparameter Optimization
@@ -747,7 +749,8 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
               </Button>
               <Button 
                 variant="outline" 
-                className="w-full" 
+                className="w-full"
+                disabled
                 onClick={() => {
                   if (models.length < 2) {
                     toast.info('At least 2 models are required for comparison. Currently only 1 SVM model is supported.');
@@ -763,7 +766,7 @@ export default function DataScientistDashboard({ user }: DataScientistDashboardP
                 variant="outline" 
                 className="w-full"
                 onClick={() => setTrainModelDialogOpen(true)}
-                disabled={loading}
+                disabled
               >
                 <Play className="w-4 h-4 mr-2" />
                 Train New Model

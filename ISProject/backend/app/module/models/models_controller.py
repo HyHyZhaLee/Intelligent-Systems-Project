@@ -97,17 +97,21 @@ async def get_model_metrics(
     
     Returns accuracy, precision, recall, F1-score
     """
-    # TODO: Implement metrics retrieval
-    return MetricsResponse(
-        success=True,
-        data={
-            "accuracy": 0.985,
-            "precision": 0.986,
-            "recall": 0.985,
-            "f1_score": 0.985
-        },
-        timestamp=datetime.utcnow().isoformat()
-    )
+    try:
+        metrics = await models_service.get_metrics(model_id, db)
+        return MetricsResponse(
+            success=True,
+            data=metrics,
+            timestamp=datetime.utcnow().isoformat()
+        )
+    except HTTPException:
+        # rethrow known HTTPExceptions
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve metrics: {str(e)}"
+        )
 
 
 @router.get("/{model_id}/confusion-matrix", response_model=ConfusionMatrixResponse, status_code=status.HTTP_200_OK)
@@ -148,32 +152,18 @@ async def get_roc_curve(
     
     Returns ROC curve data for each digit class and micro/macro averages
     """
-    # TODO: Implement ROC curve data retrieval
-    return ROCCurveResponse(
-        success=True,
-        data={
-            "curves": [
-                {
-                    "class": i,
-                    "fpr": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-                    "tpr": [0.0, 0.9, 0.95, 0.97, 0.98, 0.99, 0.99, 0.995, 0.998, 0.999, 1.0],
-                    "auc": 0.99
-                }
-                for i in range(10)
-            ],
-            "micro_avg": {
-                "fpr": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-                "tpr": [0.0, 0.9, 0.95, 0.97, 0.98, 0.99, 0.99, 0.995, 0.998, 0.999, 1.0],
-                "auc": 0.985
-            },
-            "macro_avg": {
-                "fpr": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-                "tpr": [0.0, 0.9, 0.95, 0.97, 0.98, 0.99, 0.99, 0.995, 0.998, 0.999, 1.0],
-                "auc": 0.984
-            }
-        },
-        timestamp=datetime.utcnow().isoformat()
-    )
+    try:
+        roc_data = await models_service.get_roc_curve(model_id, db)
+        return ROCCurveResponse(
+            success=True,
+            data=roc_data,
+            timestamp=datetime.utcnow().isoformat()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve ROC curve: {str(e)}"
+        )
 
 
 @router.post("/{model_id}/tune", response_model=HyperparameterTuneResponse, status_code=status.HTTP_202_ACCEPTED)
